@@ -583,6 +583,7 @@ void QuicSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
     case ENCRYPTION_FIRST_ESTABLISHED:
       // Given any streams blocked by encryption a chance to write.
       OnCanWrite();
+      connection_->OnHandshakeEncryptionEstablished();
       break;
 
     case ENCRYPTION_REESTABLISHED:
@@ -591,6 +592,7 @@ void QuicSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
       connection_->RetransmitUnackedPackets(ALL_INITIAL_RETRANSMISSION);
       // Given any streams blocked by encryption a chance to write.
       OnCanWrite();
+      connection_->OnHandshakeEncryptionEstablished();
       break;
 
     case HANDSHAKE_CONFIRMED:

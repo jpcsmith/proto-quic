@@ -105,6 +105,9 @@ struct QUIC_EXPORT_PRIVATE QuicAckFrame {
   friend QUIC_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
                                                       const QuicAckFrame& s);
 
+  // The id of the subflow for which the acknowledgements are meant.
+  QuicSubflowId subflow_id;
+
   // The highest packet number we've observed from the peer.
   QuicPacketNumber largest_observed;
 

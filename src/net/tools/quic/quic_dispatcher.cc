@@ -631,6 +631,16 @@ bool QuicDispatcher::OnBlockedFrame(const QuicBlockedFrame& frame) {
   return false;
 }
 
+bool QuicDispatcher::OnNewSubflowFrame(const QuicNewSubflowFrame& frame) {
+  DCHECK(false);
+  return false;
+}
+
+bool QuicDispatcher::OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) {
+  DCHECK(false);
+  return false;
+}
+
 void QuicDispatcher::OnPacketComplete() {
   DCHECK(false);
 }
