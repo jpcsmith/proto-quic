@@ -7,12 +7,13 @@
 namespace net {
 
 QuicNewSubflowFrame::QuicNewSubflowFrame(QuicSubflowId subflow_id)
-    : subflow_id(subflow_id) {}
+    : subflow_id(subflow_id) {
+}
 
 std::ostream& operator<<(std::ostream& os,
-                         const QuicNewSubflowFrame& new_subflow_frame) {
+    const QuicNewSubflowFrame& new_subflow_frame) {
   os << "{ subflow_id: " << new_subflow_frame.subflow_id << " }\n";
   return os;
 }
 
-}  // namespace net
+} // namespace net

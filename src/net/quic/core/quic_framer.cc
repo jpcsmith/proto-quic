@@ -1259,8 +1259,8 @@ bool QuicFramer::ProcessAckFrame(QuicDataReader* reader,
 
   if (!reader->ReadUInt32(&ack_frame->subflow_id))
   {
-	  set_detailed_error("Unable to read subflow id.");
-	  return false;
+    set_detailed_error("Unable to read subflow id.");
+    return false;
   }
 
   if (!reader->ReadBytesToUInt64(largest_acked_length,
@@ -1953,9 +1953,9 @@ bool QuicFramer::AppendAckFrameAndTypeByte(const QuicAckFrame& frame,
     return false;
   }
 
-  // Subflow id (for now just send subflow id stored in QuicConnection)
+  // Subflow id
   if (!writer->WriteUInt32(frame.subflow_id)) {
-	  return false;
+    return false;
   }
 
   // Largest acked.

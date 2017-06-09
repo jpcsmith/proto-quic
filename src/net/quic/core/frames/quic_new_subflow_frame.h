@@ -17,17 +17,17 @@ namespace net {
 // included to mitigate man-in-the-middle attack (since first packet uses 0RTT)?
 // Or is it authenticated using address validation?
 struct QUIC_EXPORT_PRIVATE QuicNewSubflowFrame {
-	QuicNewSubflowFrame() {}
-	QuicNewSubflowFrame(QuicSubflowId subflow_id);
+  QuicNewSubflowFrame() {
+  }
+  QuicNewSubflowFrame(QuicSubflowId subflow_id);
 
-  friend QUIC_EXPORT_PRIVATE std::ostream& operator<<(
-      std::ostream& os,
+  friend QUIC_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
       const QuicNewSubflowFrame& w);
 
   // The id of the new subflow
   QuicSubflowId subflow_id;
 };
 
-}  // namespace net
+} // namespace net
 
 #endif  // NET_QUIC_CORE_FRAMES_QUIC_NEW_SUBFLOW_FRAME_H_

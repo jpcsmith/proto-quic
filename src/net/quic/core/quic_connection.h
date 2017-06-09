@@ -693,8 +693,6 @@ class QUIC_EXPORT_PRIVATE QuicConnection
     return last_packet_source_address_;
   }
 
-  virtual void OnHandshakeEncryptionEstablished();
-
  protected:
   // Calls cancel() on all the alarms owned by this connection.
   void CancelAllAlarms();

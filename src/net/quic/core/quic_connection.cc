@@ -268,16 +268,6 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       write_error_occured_(false),
       no_stop_waiting_frames_(false),
       consecutive_num_packets_with_no_retransmittable_frames_(0) {
-
-  // initialize with random subflow id for client and let the server wait
-  // for the client to announce the subflow id
-  uint32_t subflowId = 0;
-  if(perspective_ == Perspective::IS_CLIENT)
-  {
-  random_generator_->RandBytes(&subflowId,sizeof(subflowId));
-  }
-  received_packet_manager_.setSubflowId(subflowId);
-
   QUIC_DLOG(INFO) << ENDPOINT
                   << "Created connection with connection_id: " << connection_id;
   framer_.set_visitor(this);
@@ -1989,20 +1979,11 @@ void QuicConnection::SendConnectionClosePacket(QuicErrorCode error,
   QUIC_DLOG(INFO) << ENDPOINT << "Sending connection close packet.";
   ClearQueuedPackets();
   ScopedPacketBundler ack_bundler(this, ack_mode);
-  QuicSubflowCloseFrame* subflow_close_frame = new QuicSubflowCloseFrame(received_packet_manager_.getSubflowId());
-  packet_generator_.AddControlFrame(QuicFrame(subflow_close_frame));
   QuicConnectionCloseFrame* frame = new QuicConnectionCloseFrame();
   frame->error_code = error;
   frame->error_details = details;
   packet_generator_.AddControlFrame(QuicFrame(frame));
   packet_generator_.FlushAllQueuedFrames();
-}
-
-void QuicConnection::OnHandshakeEncryptionEstablished() {
-	  ScopedPacketBundler ack_bundler(this, NO_ACK);
-	  QuicNewSubflowFrame* new_subflow_frame = new QuicNewSubflowFrame(received_packet_manager_.getSubflowId());
-	  packet_generator_.AddControlFrame(QuicFrame(new_subflow_frame));
-	  packet_generator_.FlushAllQueuedFrames();
 }
 
 void QuicConnection::TearDownLocalConnectionState(

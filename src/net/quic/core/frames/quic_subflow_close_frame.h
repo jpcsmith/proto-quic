@@ -14,17 +14,17 @@ namespace net {
 
 // A subflow_close frame announces a subflow to be closed.
 struct QUIC_EXPORT_PRIVATE QuicSubflowCloseFrame {
-	QuicSubflowCloseFrame() {}
-	QuicSubflowCloseFrame(QuicSubflowId subflow_id);
+  QuicSubflowCloseFrame() {
+  }
+  QuicSubflowCloseFrame(QuicSubflowId subflow_id);
 
-  friend QUIC_EXPORT_PRIVATE std::ostream& operator<<(
-      std::ostream& os,
+  friend QUIC_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
       const QuicSubflowCloseFrame& w);
 
   // The id of the subflow to be closed
   QuicSubflowId subflow_id;
 };
 
-}  // namespace net
+} // namespace net
 
 #endif  // NET_QUIC_CORE_FRAMES_QUIC_SUBFLOW_CLOSE_FRAME_H_
