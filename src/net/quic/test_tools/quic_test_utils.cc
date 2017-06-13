@@ -216,6 +216,14 @@ bool NoOpFramerVisitor::OnBlockedFrame(const QuicBlockedFrame& frame) {
   return true;
 }
 
+bool NoOpFramerVisitor::OnNewSubflowFrame(const QuicNewSubflowFrame& frame) {
+  return true;
+}
+
+bool NoOpFramerVisitor::OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) {
+  return true;
+}
+
 MockQuicConnectionVisitor::MockQuicConnectionVisitor() {}
 
 MockQuicConnectionVisitor::~MockQuicConnectionVisitor() {}

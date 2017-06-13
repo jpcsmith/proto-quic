@@ -38,6 +38,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gmock_mutant.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "net/quic/core/quic_connection_manager.h"
 
 using std::string;
 using testing::CreateFunctor;
@@ -298,7 +299,7 @@ class QuicDispatcherTest : public QuicTest {
         connection_id, helper, alarm_factory, dispatcher);
     *session = new TestQuicSpdyServerSession(config, connection, crypto_config,
                                              compressed_certs_cache);
-    connection->set_visitor(*session);
+    (*session)->connectionManager()->set_visitor(*session);
     ON_CALL(*connection, CloseConnection(_, _, _))
         .WillByDefault(WithoutArgs(Invoke(
             connection, &MockServerConnection::UnregisterOnConnectionClosed)));

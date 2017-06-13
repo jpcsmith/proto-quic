@@ -179,6 +179,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
 
   QuicConnection* connection() { return connection_manager_->initialConnection(); }
   const QuicConnection* connection() const { return connection_manager_->initialConnection(); }
+  QuicConnectionManager* connectionManager() { return connection_manager_; }
   size_t num_active_requests() const { return dynamic_stream_map_.size(); }
   const QuicSocketAddress& peer_address() const {
     return connection()->peer_address();

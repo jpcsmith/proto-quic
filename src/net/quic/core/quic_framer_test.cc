@@ -46,6 +46,7 @@ const QuicPacketNumber kLeastUnacked = UINT64_C(0x0123456789AA0);
 const QuicStreamId kStreamId = UINT64_C(0x01020304);
 const QuicStreamOffset kStreamOffset = UINT64_C(0xBA98FEDC32107654);
 const QuicPublicResetNonceProof kNonceProof = UINT64_C(0xABCDEF0123456789);
+const QuicSubflowId kSubflowId = UINT32_C(0x12345678);
 
 // Index into the connection_id offset in the header.
 const size_t kConnectionIdOffset = kPublicFlagsSize;
@@ -263,6 +264,16 @@ class TestQuicVisitor : public QuicFramerVisitorInterface {
     return true;
   }
 
+  bool OnNewSubflowFrame(const QuicNewSubflowFrame& frame) override {
+    new_subflow_frame_ = frame;
+    return true;
+  }
+
+  bool OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override {
+    subflow_close_frame_ = frame;
+    return true;
+  }
+
   // Counters from the visitor_ callbacks.
   int error_count_;
   int version_mismatch_;
@@ -286,6 +297,8 @@ class TestQuicVisitor : public QuicFramerVisitorInterface {
   QuicGoAwayFrame goaway_frame_;
   QuicWindowUpdateFrame window_update_frame_;
   QuicBlockedFrame blocked_frame_;
+  QuicNewSubflowFrame new_subflow_frame_;
+  QuicSubflowCloseFrame subflow_close_frame_;
   std::vector<std::unique_ptr<string>> stream_data_;
 };
 
@@ -2446,6 +2459,8 @@ TEST_P(QuicFramerTest, AckFrameOneAckBlock) {
       // frame type (ack frame)
       // (one ack block, 2 byte largest observed, 2 byte block length)
       0x45,
+      // subflow id
+      0x78, 0x56, 0x34, 0x12,
       // largest acked
       0x34, 0x12,
       // Zero delta time.
@@ -2467,6 +2482,8 @@ TEST_P(QuicFramerTest, AckFrameOneAckBlock) {
       // frame type (ack frame)
       // (one ack block, 2 byte largest observed, 2 byte block length)
       0x45,
+      // subflow id
+      0x78, 0x56, 0x34, 0x12,
       // largest acked
       0x34, 0x12,
       // Zero delta time.
@@ -2488,6 +2505,8 @@ TEST_P(QuicFramerTest, AckFrameOneAckBlock) {
       // frame type (ack frame)
       // (one ack block, 2 byte largest observed, 2 byte block length)
       0x45,
+      // subflow id
+      0x12, 0x34, 0x56, 0x78,
       // largest acked
       0x12, 0x34,
       // Zero delta time.
@@ -2509,6 +2528,8 @@ TEST_P(QuicFramerTest, AckFrameOneAckBlock) {
       // frame type (ack frame)
       // (one ack block, 2 byte largest observed, 2 byte block length)
       0x45,
+      // subflow id
+      0x12, 0x34, 0x56, 0x78,
       // largest acked
       0x12, 0x34,
       // Zero delta time.
@@ -2537,10 +2558,12 @@ TEST_P(QuicFramerTest, AckFrameOneAckBlock) {
   const QuicAckFrame& frame = *visitor_.ack_frames_[0];
   EXPECT_EQ(kSmallLargestObserved, frame.largest_observed);
   ASSERT_EQ(4660u, frame.packets.NumPacketsSlow());
+  EXPECT_EQ(kSubflowId,frame.subflow_id);
 
   const size_t kLargestAckedOffset = kQuicFrameTypeSize;
+  const size_t kSubflowIdOffset = kLargestAckedOffset + kQuicSubflowIdSize;
   const size_t kLargestAckedDeltaTimeOffset =
-      kLargestAckedOffset + PACKET_2BYTE_PACKET_NUMBER;
+      kSubflowIdOffset + PACKET_2BYTE_PACKET_NUMBER;
   const size_t kFirstAckBlockLengthOffset =
       kLargestAckedDeltaTimeOffset + kQuicDeltaTimeLargestObservedSize;
   const size_t kNumTimestampsOffset =
@@ -2550,7 +2573,9 @@ TEST_P(QuicFramerTest, AckFrameOneAckBlock) {
       kFirstAckBlockLengthOffset + PACKET_2BYTE_PACKET_NUMBER;
   for (size_t i = kQuicFrameTypeSize; i < ack_frame_size; ++i) {
     string expected_error;
-    if (i < kLargestAckedDeltaTimeOffset) {
+    if (i < kSubflowIdOffset) {
+      expected_error = "Unable to read subflow id.";
+    } else if (i < kLargestAckedDeltaTimeOffset) {
       expected_error = "Unable to read largest acked.";
     } else if (i < kFirstAckBlockLengthOffset) {
       expected_error = "Unable to read ack delay time.";
@@ -2581,6 +2606,8 @@ TEST_P(QuicFramerTest, AckFrameTwoTimeStampsMultipleAckBlocks) {
       // frame type (ack frame)
       // (more than one ack block, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x78, 0x56, 0x34, 0x12,
       // largest acked
       0x34, 0x12,
       // Zero delta time.
@@ -2628,6 +2655,8 @@ TEST_P(QuicFramerTest, AckFrameTwoTimeStampsMultipleAckBlocks) {
       // frame type (ack frame)
       // (more than one ack block, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x78, 0x56, 0x34, 0x12,
       // largest acked
       0x34, 0x12,
       // Zero delta time.
@@ -2675,6 +2704,8 @@ TEST_P(QuicFramerTest, AckFrameTwoTimeStampsMultipleAckBlocks) {
       // frame type (ack frame)
       // (more than one ack block, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x12, 0x34, 0x56, 0x78,
       // largest acked
       0x12, 0x34,
       // Zero delta time.
@@ -2722,6 +2753,8 @@ TEST_P(QuicFramerTest, AckFrameTwoTimeStampsMultipleAckBlocks) {
       // frame type (ack frame)
       // (more than one ack block, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x12, 0x34, 0x56, 0x78,
       // largest acked
       0x12, 0x34,
       // Zero delta time.
@@ -2776,10 +2809,12 @@ TEST_P(QuicFramerTest, AckFrameTwoTimeStampsMultipleAckBlocks) {
   const QuicAckFrame& frame = *visitor_.ack_frames_[0];
   EXPECT_EQ(kSmallLargestObserved, frame.largest_observed);
   ASSERT_EQ(4254u, frame.packets.NumPacketsSlow());
+  EXPECT_EQ(kSubflowId,frame.subflow_id);
 
   const size_t kLargestAckedOffset = kQuicFrameTypeSize;
+  const size_t kSubflowIdOffset = kLargestAckedOffset + kQuicSubflowIdSize;
   const size_t kLargestAckedDeltaTimeOffset =
-      kLargestAckedOffset + PACKET_2BYTE_PACKET_NUMBER;
+      kSubflowIdOffset + PACKET_2BYTE_PACKET_NUMBER;
   const size_t kNumberOfAckBlocksOffset =
       kLargestAckedDeltaTimeOffset + kQuicDeltaTimeLargestObservedSize;
   const size_t kFirstAckBlockLengthOffset =
@@ -2812,8 +2847,10 @@ TEST_P(QuicFramerTest, AckFrameTwoTimeStampsMultipleAckBlocks) {
       kAckBlockLengthOffset4 + PACKET_2BYTE_PACKET_NUMBER;
   for (size_t i = kQuicFrameTypeSize; i < ack_frame_size; ++i) {
     string expected_error;
-    if (i < kLargestAckedDeltaTimeOffset) {
-      expected_error = "Unable to read largest acked.";
+    if (i < kSubflowIdOffset) {
+      expected_error = "Unable to read subflow id.";
+    } else if (i < kLargestAckedDeltaTimeOffset) {
+        expected_error = "Unable to read largest acked.";
     } else if (i < kNumberOfAckBlocksOffset) {
       expected_error = "Unable to read ack delay time.";
     } else if (i < kFirstAckBlockLengthOffset) {
@@ -4914,6 +4951,7 @@ TEST_P(QuicFramerTest, BuildAckFramePacketOneAckBlock) {
 
   // Use kSmallLargestObserved to make this test finished in a short time.
   QuicAckFrame ack_frame;
+  ack_frame.subflow_id = kSubflowId;
   ack_frame.largest_observed = kSmallLargestObserved;
   ack_frame.ack_delay_time = QuicTime::Delta::Zero();
   ack_frame.packets.Add(1, kSmallLargestObserved + 1);
@@ -4932,6 +4970,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketOneAckBlock) {
       // frame type (ack frame)
       // (no ack blocks, 2 byte largest observed, 2 byte block length)
       0x45,
+      // subflow id
+      0x78, 0x56, 0x34, 0x12,
       // largest acked
       0x34, 0x12,
       // Zero delta time.
@@ -4953,6 +4993,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketOneAckBlock) {
       // frame type (ack frame)
       // (no ack blocks, 2 byte largest observed, 2 byte block length)
       0x45,
+      // subflow id
+      0x78, 0x56, 0x34, 0x12,
       // largest acked
       0x34, 0x12,
       // Zero delta time.
@@ -4974,6 +5016,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketOneAckBlock) {
       // frame type (ack frame)
       // (no ack blocks, 2 byte largest observed, 2 byte block length)
       0x45,
+      // subflow id
+      0x12, 0x34, 0x56, 0x78,
       // largest acked
       0x12, 0x34,
       // Zero delta time.
@@ -4995,6 +5039,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketOneAckBlock) {
       // frame type (ack frame)
       // (no ack blocks, 2 byte largest observed, 2 byte block length)
       0x45,
+      // subflow id
+      0x12, 0x34, 0x56, 0x78,
       // largest acked
       0x12, 0x34,
       // Zero delta time.
@@ -5026,6 +5072,7 @@ TEST_P(QuicFramerTest, BuildAckFramePacketMultipleAckBlocks) {
 
   // Use kSmallLargestObserved to make this test finished in a short time.
   QuicAckFrame ack_frame;
+  ack_frame.subflow_id = kSubflowId;
   ack_frame.largest_observed = kSmallLargestObserved;
   ack_frame.ack_delay_time = QuicTime::Delta::Zero();
   ack_frame.packets.Add(1, 5);
@@ -5047,6 +5094,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketMultipleAckBlocks) {
       // frame type (ack frame)
       // (has ack blocks, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x78, 0x56, 0x34, 0x12,
       // largest acked
       0x34, 0x12,
       // Zero delta time.
@@ -5086,6 +5135,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketMultipleAckBlocks) {
       // frame type (ack frame)
       // (has ack blocks, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x78, 0x56, 0x34, 0x12,
       // largest acked
       0x34, 0x12,
       // Zero delta time.
@@ -5125,6 +5176,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketMultipleAckBlocks) {
       // frame type (ack frame)
       // (has ack blocks, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x12, 0x34, 0x56, 0x78,
       // largest acked
       0x12, 0x34,
       // Zero delta time.
@@ -5164,6 +5217,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketMultipleAckBlocks) {
       // frame type (ack frame)
       // (has ack blocks, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x12, 0x34, 0x56, 0x78,
       // largest acked
       0x12, 0x34,
       // Zero delta time.
@@ -5213,6 +5268,7 @@ TEST_P(QuicFramerTest, BuildAckFramePacketMaxAckBlocks) {
 
   // Use kSmallLargestObservedto make this test finished in a short time.
   QuicAckFrame ack_frame;
+  ack_frame.subflow_id = kSubflowId;
   ack_frame.largest_observed = kSmallLargestObserved;
   ack_frame.ack_delay_time = QuicTime::Delta::Zero();
   // 300 ack blocks.
@@ -5234,6 +5290,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketMaxAckBlocks) {
       // frame type (ack frame)
       // (has ack blocks, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x78, 0x56, 0x34, 0x12,
       // largest acked
       0x34, 0x12,
       // Zero delta time.
@@ -5327,6 +5385,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketMaxAckBlocks) {
       // frame type (ack frame)
       // (has ack blocks, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x78, 0x56, 0x34, 0x12,
       // largest acked
       0x34, 0x12,
       // Zero delta time.
@@ -5420,6 +5480,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketMaxAckBlocks) {
       // frame type (ack frame)
       // (has ack blocks, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x12, 0x34, 0x56, 0x78,
       // largest acked
       0x12, 0x34,
       // Zero delta time.
@@ -5513,6 +5575,8 @@ TEST_P(QuicFramerTest, BuildAckFramePacketMaxAckBlocks) {
       // frame type (ack frame)
       // (has ack blocks, 2 byte largest observed, 2 byte block length)
       0x65,
+      // subflow id
+      0x12, 0x34, 0x56, 0x78,
       // largest acked
       0x12, 0x34,
       // Zero delta time.
@@ -7270,6 +7334,362 @@ TEST_P(QuicFramerTest, FramerFuzzTest) {
   size_t index = GetPacketIndex(framer_.version(), framer_.perspective());
 
   QuicFramerFuzzFunc(packets[index], arraysize(packet));
+}
+
+TEST_P(QuicFramerTest, NewSubflowFrame) {
+  // clang-format off
+  unsigned char packet[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0x10, 0x32, 0x54, 0x76,
+    0x98, 0xBA, 0xDC, 0xFE,
+    // packet number
+    0xBC, 0x9A, 0x78, 0x56,
+    0x34, 0x12,
+
+    // frame type (new subflow frame)
+    0x08,
+    // subflow id
+    0x78, 0x56, 0x34, 0x12,
+  };
+
+  unsigned char packet_cid_be[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+    // packet number
+    0xBC, 0x9A, 0x78, 0x56,
+    0x34, 0x12,
+
+    // frame type (new subflow frame)
+    0x08,
+    // subflow id
+    0x12, 0x34, 0x56, 0x78,
+  };
+
+  unsigned char packet39[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0x10, 0x32, 0x54, 0x76,
+    0x98, 0xBA, 0xDC, 0xFE,
+    // packet number
+    0x12, 0x34, 0x56, 0x78,
+    0x9A, 0xBC,
+
+    // frame type (new subflow frame)
+    0x08,
+    // subflow id
+    0x78, 0x56, 0x34, 0x12,
+  };
+
+  unsigned char packet_cid_be39[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+    // packet number
+    0x12, 0x34, 0x56, 0x78,
+    0x9A, 0xBC,
+
+    // frame type (new subflow frame)
+    0x08,
+    // subflow id
+    0x12, 0x34, 0x56, 0x78,
+  };
+  // clang-format on
+
+  unsigned char* packets[] = {packet, packet_cid_be, packet39, packet_cid_be39};
+  size_t index = GetPacketIndex(framer_.version(), framer_.perspective());
+
+  QuicEncryptedPacket encrypted(AsChars(packets[index]), arraysize(packet),
+                                false);
+  EXPECT_TRUE(framer_.ProcessPacket(encrypted));
+
+  EXPECT_EQ(QUIC_NO_ERROR, framer_.error());
+  ASSERT_TRUE(visitor_.header_.get());
+  EXPECT_TRUE(CheckDecryption(encrypted, !kIncludeVersion,
+                              !kIncludeDiversificationNonce));
+
+  EXPECT_EQ(0u, visitor_.stream_frames_.size());
+
+  EXPECT_EQ(kSubflowId,visitor_.new_subflow_frame_.subflow_id);
+
+  ASSERT_EQ(0u, visitor_.ack_frames_.size());
+
+  // Now test framing boundaries.
+  for (size_t i = kQuicFrameTypeSize;
+       i < kQuicFrameTypeSize + kQuicSubflowIdSize; ++i) {
+    CheckProcessingFails(
+        packets[index],
+        i + GetPacketHeaderSize(framer_.version(), PACKET_8BYTE_CONNECTION_ID,
+                                !kIncludeVersion, !kIncludeDiversificationNonce,
+                                PACKET_6BYTE_PACKET_NUMBER),
+        "Unable to read subflow id.", QUIC_INVALID_NEW_SUBFLOW_DATA);
+  }
+}
+
+TEST_P(QuicFramerTest, SubflowCloseFrame) {
+  // clang-format off
+  unsigned char packet[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0x10, 0x32, 0x54, 0x76,
+    0x98, 0xBA, 0xDC, 0xFE,
+    // packet number
+    0xBC, 0x9A, 0x78, 0x56,
+    0x34, 0x12,
+
+    // frame type (subflow close frame)
+    0x09,
+    // subflow id
+    0x78, 0x56, 0x34, 0x12,
+  };
+
+  unsigned char packet_cid_be[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+    // packet number
+    0xBC, 0x9A, 0x78, 0x56,
+    0x34, 0x12,
+
+    // frame type (subflow close frame)
+    0x09,
+    // subflow id
+    0x12, 0x34, 0x56, 0x78,
+  };
+
+  unsigned char packet39[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0x10, 0x32, 0x54, 0x76,
+    0x98, 0xBA, 0xDC, 0xFE,
+    // packet number
+    0x12, 0x34, 0x56, 0x78,
+    0x9A, 0xBC,
+
+    // frame type (subflow close frame)
+    0x09,
+    // subflow id
+    0x78, 0x56, 0x34, 0x12,
+  };
+
+  unsigned char packet_cid_be39[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+    // packet number
+    0x12, 0x34, 0x56, 0x78,
+    0x9A, 0xBC,
+
+    // frame type (subflow close frame)
+    0x09,
+    // subflow id
+    0x12, 0x34, 0x56, 0x78,
+  };
+  // clang-format on
+
+  unsigned char* packets[] = {packet, packet_cid_be, packet39, packet_cid_be39};
+  size_t index = GetPacketIndex(framer_.version(), framer_.perspective());
+
+  QuicEncryptedPacket encrypted(AsChars(packets[index]), arraysize(packet),
+                                false);
+  EXPECT_TRUE(framer_.ProcessPacket(encrypted));
+
+  EXPECT_EQ(QUIC_NO_ERROR, framer_.error());
+  ASSERT_TRUE(visitor_.header_.get());
+  EXPECT_TRUE(CheckDecryption(encrypted, !kIncludeVersion,
+                              !kIncludeDiversificationNonce));
+
+  EXPECT_EQ(0u, visitor_.stream_frames_.size());
+
+  EXPECT_EQ(kSubflowId,visitor_.subflow_close_frame_.subflow_id);
+
+  ASSERT_EQ(0u, visitor_.ack_frames_.size());
+
+  // Now test framing boundaries.
+  for (size_t i = kQuicFrameTypeSize;
+       i < kQuicFrameTypeSize + kQuicSubflowIdSize; ++i) {
+    CheckProcessingFails(
+        packets[index],
+        i + GetPacketHeaderSize(framer_.version(), PACKET_8BYTE_CONNECTION_ID,
+                                !kIncludeVersion, !kIncludeDiversificationNonce,
+                                PACKET_6BYTE_PACKET_NUMBER),
+        "Unable to read subflow id.", QUIC_INVALID_SUBFLOW_CLOSE_DATA);
+  }
+}
+
+TEST_P(QuicFramerTest, BuildNewSubflowPacket) {
+  QuicPacketHeader header;
+  header.public_header.connection_id = kConnectionId;
+  header.public_header.reset_flag = false;
+  header.public_header.version_flag = false;
+  header.packet_number = kPacketNumber;
+
+  QuicNewSubflowFrame new_subflow_frame;
+  new_subflow_frame.subflow_id = kSubflowId;
+
+  QuicFrames frames = {QuicFrame(&new_subflow_frame)};
+
+  // clang-format off
+  unsigned char packet[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0x10, 0x32, 0x54, 0x76,
+    0x98, 0xBA, 0xDC, 0xFE,
+    // packet number
+    0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12,
+
+    // frame type (subflow close frame)
+    0x08,
+    // subflow id
+    0x78, 0x56, 0x34, 0x12,
+  };
+
+  unsigned char packet_cid_be[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+    // packet number
+    0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12,
+
+    // frame type (subflow close frame)
+    0x08,
+    // subflow id
+    0x12, 0x34, 0x56, 0x78,
+  };
+
+  unsigned char packet39[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0x10, 0x32, 0x54, 0x76,
+    0x98, 0xBA, 0xDC, 0xFE,
+    // packet number
+    0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+
+    // frame type (subflow close frame)
+    0x08,
+    // subflow id
+    0x78, 0x56, 0x34, 0x12,
+  };
+
+  unsigned char packet_cid_be39[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+    // packet number
+    0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+
+    // frame type (subflow close frame)
+    0x08,
+    // subflow id
+    0x12, 0x34, 0x56, 0x78,
+  };
+  // clang-format on
+
+  unsigned char* packets[] = {packet, packet_cid_be, packet39, packet_cid_be39};
+  size_t index = GetPacketIndex(framer_.version(), framer_.perspective());
+
+  std::unique_ptr<QuicPacket> data(BuildDataPacket(header, frames));
+  ASSERT_TRUE(data != nullptr);
+
+  test::CompareCharArraysWithHexError("constructed packet", data->data(),
+                                      data->length(), AsChars(packets[index]),
+                                      arraysize(packet));
+}
+
+TEST_P(QuicFramerTest, BuildSubflowClosePacket) {
+  QuicPacketHeader header;
+  header.public_header.connection_id = kConnectionId;
+  header.public_header.reset_flag = false;
+  header.public_header.version_flag = false;
+  header.packet_number = kPacketNumber;
+
+  QuicSubflowCloseFrame subflow_close_frame;
+  subflow_close_frame.subflow_id = kSubflowId;
+
+  QuicFrames frames = {QuicFrame(&subflow_close_frame)};
+
+  // clang-format off
+  unsigned char packet[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0x10, 0x32, 0x54, 0x76,
+    0x98, 0xBA, 0xDC, 0xFE,
+    // packet number
+    0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12,
+
+    // frame type (subflow close frame)
+    0x09,
+    // subflow id
+    0x78, 0x56, 0x34, 0x12,
+  };
+
+  unsigned char packet_cid_be[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+    // packet number
+    0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12,
+
+    // frame type (subflow close frame)
+    0x09,
+    // subflow id
+    0x78, 0x56, 0x34, 0x12,
+  };
+
+  unsigned char packet39[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0x10, 0x32, 0x54, 0x76,
+    0x98, 0xBA, 0xDC, 0xFE,
+    // packet number
+    0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+
+    // frame type (subflow close frame)
+    0x09,
+    // subflow id
+    0x12, 0x34, 0x56, 0x78,
+  };
+
+  unsigned char packet_cid_be39[] = {
+    // public flags (8 byte connection_id)
+    0x38,
+    // connection_id
+    0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+    // packet number
+    0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC,
+
+    // frame type (subflow close frame)
+    0x09,
+    // subflow id
+    0x12, 0x34, 0x56, 0x78,
+  };
+  // clang-format on
+
+  unsigned char* packets[] = {packet, packet_cid_be, packet39, packet_cid_be39};
+  size_t index = GetPacketIndex(framer_.version(), framer_.perspective());
+
+  std::unique_ptr<QuicPacket> data(BuildDataPacket(header, frames));
+  ASSERT_TRUE(data != nullptr);
+
+  test::CompareCharArraysWithHexError("constructed packet", data->data(),
+                                      data->length(), AsChars(packets[index]),
+                                      arraysize(packet));
 }
 
 }  // namespace
