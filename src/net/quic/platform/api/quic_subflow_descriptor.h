@@ -22,6 +22,8 @@ public:
       const QuicSubflowDescriptor& rhs);
   QUIC_EXPORT_PRIVATE friend bool operator!=(const QuicSubflowDescriptor& lhs,
       const QuicSubflowDescriptor& rhs);
+  QUIC_EXPORT_PRIVATE friend bool operator<(const QuicSubflowDescriptor& lhs,
+      const QuicSubflowDescriptor& rhs);
 
   bool IsInitialized() const;
   std::string ToString() const;

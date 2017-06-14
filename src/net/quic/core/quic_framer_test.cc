@@ -6890,8 +6890,8 @@ TEST_P(QuicFramerTest, AckTruncationSmallPacket) {
   ASSERT_EQ(1u, visitor_.ack_frames_.size());
   QuicAckFrame& processed_ack_frame = *visitor_.ack_frames_[0];
   EXPECT_EQ(600u, processed_ack_frame.largest_observed);
-  ASSERT_EQ(239u, processed_ack_frame.packets.NumPacketsSlow());
-  EXPECT_EQ(124u, processed_ack_frame.packets.Min());
+  ASSERT_EQ(237u, processed_ack_frame.packets.NumPacketsSlow());
+  EXPECT_EQ(120u, processed_ack_frame.packets.Min());
   EXPECT_EQ(600u, processed_ack_frame.packets.Max());
 }
 
@@ -7366,7 +7366,7 @@ TEST_P(QuicFramerTest, NewSubflowFrame) {
     // frame type (new subflow frame)
     0x08,
     // subflow id
-    0x12, 0x34, 0x56, 0x78,
+    0x78, 0x56, 0x34, 0x12,
   };
 
   unsigned char packet39[] = {
@@ -7382,7 +7382,7 @@ TEST_P(QuicFramerTest, NewSubflowFrame) {
     // frame type (new subflow frame)
     0x08,
     // subflow id
-    0x78, 0x56, 0x34, 0x12,
+    0x12, 0x34, 0x56, 0x78,
   };
 
   unsigned char packet_cid_be39[] = {
@@ -7461,7 +7461,7 @@ TEST_P(QuicFramerTest, SubflowCloseFrame) {
     // frame type (subflow close frame)
     0x09,
     // subflow id
-    0x12, 0x34, 0x56, 0x78,
+    0x78, 0x56, 0x34, 0x12,
   };
 
   unsigned char packet39[] = {
@@ -7477,7 +7477,7 @@ TEST_P(QuicFramerTest, SubflowCloseFrame) {
     // frame type (subflow close frame)
     0x09,
     // subflow id
-    0x78, 0x56, 0x34, 0x12,
+    0x12, 0x34, 0x56, 0x78,
   };
 
   unsigned char packet_cid_be39[] = {
@@ -7565,7 +7565,7 @@ TEST_P(QuicFramerTest, BuildNewSubflowPacket) {
     // frame type (subflow close frame)
     0x08,
     // subflow id
-    0x12, 0x34, 0x56, 0x78,
+    0x78, 0x56, 0x34, 0x12,
   };
 
   unsigned char packet39[] = {
@@ -7580,7 +7580,7 @@ TEST_P(QuicFramerTest, BuildNewSubflowPacket) {
     // frame type (subflow close frame)
     0x08,
     // subflow id
-    0x78, 0x56, 0x34, 0x12,
+    0x12, 0x34, 0x56, 0x78,
   };
 
   unsigned char packet_cid_be39[] = {

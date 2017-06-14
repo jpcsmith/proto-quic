@@ -283,7 +283,7 @@ bool QuicSession::HasOpenDynamicStreams() const {
 void QuicSession::ProcessUdpPacket(const QuicSocketAddress& self_address,
                                    const QuicSocketAddress& peer_address,
                                    const QuicReceivedPacket& packet) {
-  connection()->ProcessUdpPacket(self_address, peer_address, packet);
+  connection_manager_->ProcessUdpPacket(self_address, peer_address, packet);
 }
 
 QuicConsumedData QuicSession::WritevData(

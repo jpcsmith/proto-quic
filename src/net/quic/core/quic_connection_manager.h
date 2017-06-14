@@ -18,6 +18,7 @@
 #include "net/quic/core/quic_versions.h"
 #include "net/quic/core/quic_time.h"
 #include "net/quic/core/quic_connection.h"
+#include "net/quic/core/quic_alarm.h"
 
 namespace net {
 
@@ -92,7 +93,8 @@ public:
   virtual bool HasOpenDynamicStreams() const = 0;
 };
 
-class QUIC_EXPORT_PRIVATE QuicConnectionManager: public QuicConnectionVisitorInterface {
+class QUIC_EXPORT_PRIVATE QuicConnectionManager: public QuicConnectionVisitorInterface,
+  QuicSubflowCreationAttemptDelegate {
 public:
   QuicConnectionManager(QuicConnection *connection);
   ~QuicConnectionManager() override;
@@ -110,6 +112,16 @@ public:
     return connections_.at(kInitialSubflowId);
   }
 
+  void tryAddingSubflow(QuicSubflowDescriptor descriptor);
+  void closeSubflow(QuicSubflowId id);
+  void ProcessUdpPacket(const QuicSocketAddress& self_address,
+                                     const QuicSocketAddress& peer_address,
+                                     const QuicReceivedPacket& packet);
+
+  // QuicSubflowCreationAttemptDelegate
+  void OnSubflowCreationFailed(QuicSubflowId id) override;
+
+  // QuicConnectionVisitorInterface
   void OnStreamFrame(const QuicStreamFrame& frame) override;
   void OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
   void OnBlockedFrame(const QuicBlockedFrame& frame) override;
@@ -129,15 +141,70 @@ public:
   bool HasPendingHandshake() const override;
   bool HasOpenDynamicStreams() const override;
 
+
+  class QUIC_EXPORT_PRIVATE QuicSubflowCreationAttempt : public QuicAlarm::Delegate {
+  public:
+    const size_t kSubflowCreationTimeout = 1000;
+
+    class QUIC_EXPORT_PRIVATE QuicSubflowCreationAttemptDelegate {
+      virtual void OnSubflowCreationFailed(QuicSubflowId id) = 0;
+    };
+
+    QuicSubflowCreationAttempt(QuicSubflowDescriptor descriptor,
+        QuicSubflowId subflow_id,
+        QuicSubflowCreationAttemptDelegate *visitor,
+        QuicClock *clock,
+        QuicAlarmFactory *alarmFactory) :
+          descriptor_(descriptor),
+          subflow_id_(subflow_id),
+          last_attempt_time_(clock->ApproximateNow()),
+          n_attempts_(1),
+          visitor_(visitor)
+    {
+      alarm_ = alarmFactory->CreateAlarm(this);
+      alarm_->Set(last_attempt_time_+kSubflowCreationTimeout);
+    }
+
+    ~QuicSubflowCreationAttempt() {
+      delete alarm_;
+    }
+
+    void OnAlarm() override {
+      visitor_->OnSubflowCreationFailed(subflow_id_);
+    }
+
+  private:
+    QuicSubflowDescriptor descriptor_;
+    QuicSubflowId subflow_id_;
+    QuicTime last_attempt_time_;
+    size_t n_attempts_;
+    QuicSubflowCreationAttemptDelegate *visitor_;
+    QuicAlarm *alarm_;
+
+    DISALLOW_COPY_AND_ASSIGN(QuicSubflowCreationAttempt);
+  };
+
 protected:
 
 private:
+  QuicSubflowId GetNextOutgoingSubflowId();
+
   QuicConnectionManagerVisitorInterface *visitor_;
 
   // owns the QuicConnection objects
   std::map<QuicSubflowId, QuicConnection*> connections_;
 
-  std::map<QuicSubflowDescriptor, QuicSubflowId> subflowDescriptorMap_;
+  std::map<QuicSubflowDescriptor, QuicSubflowId> subflow_descriptor_map_;
+
+  // A set of all subflows where a connection attempt was made.
+  std::map<QuicSubflowDescriptor, QuicSubflowCreationAttempt> subflow_attempt_map_;
+
+  // The ID to use for the next outgoing subflow.
+  QuicSubflowId next_outgoing_subflow_id_;
+
+  // helper classes
+  QuicClock *clock_;
+  QuicAlarmFactory *alarm_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionManager);
 };

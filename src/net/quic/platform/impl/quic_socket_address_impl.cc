@@ -46,6 +46,11 @@ bool operator!=(const QuicSocketAddressImpl& lhs,
          lhs.socket_address_.port() != rhs.socket_address_.port();
 }
 
+bool operator<(const QuicSocketAddressImpl& lhs,
+                const QuicSocketAddressImpl& rhs) {
+  return lhs.socket_address_ < rhs.socket_address_;
+}
+
 bool QuicSocketAddressImpl::IsInitialized() const {
   return net::GetAddressFamily(socket_address_.address()) !=
          net::ADDRESS_FAMILY_UNSPECIFIED;

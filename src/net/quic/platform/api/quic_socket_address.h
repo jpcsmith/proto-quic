@@ -28,6 +28,8 @@ class QUIC_EXPORT_PRIVATE QuicSocketAddress {
                                              const QuicSocketAddress& rhs);
   QUIC_EXPORT_PRIVATE friend bool operator!=(const QuicSocketAddress& lhs,
                                              const QuicSocketAddress& rhs);
+  QUIC_EXPORT_PRIVATE friend bool operator<(const QuicSocketAddress& lhs,
+                                            const QuicSocketAddress& rhs);
 
   bool IsInitialized() const;
   std::string ToString() const;

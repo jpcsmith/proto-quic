@@ -1507,7 +1507,7 @@ bool QuicFramer::ProcessBlockedFrame(QuicDataReader* reader,
 bool QuicFramer::ProcessNewSubflowFrame(QuicDataReader* reader,
                                      QuicNewSubflowFrame* frame) {
   if (!reader->ReadUInt32(&frame->subflow_id)) {
-    set_detailed_error("Unable to read subflow_id.");
+    set_detailed_error("Unable to read subflow id.");
     return false;
   }
 
@@ -1517,7 +1517,7 @@ bool QuicFramer::ProcessNewSubflowFrame(QuicDataReader* reader,
 bool QuicFramer::ProcessSubflowCloseFrame(QuicDataReader* reader,
                                      QuicSubflowCloseFrame* frame) {
   if (!reader->ReadUInt32(&frame->subflow_id)) {
-    set_detailed_error("Unable to read subflow_id.");
+    set_detailed_error("Unable to read subflow id.");
     return false;
   }
 

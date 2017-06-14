@@ -23,6 +23,11 @@ bool operator!=(const QuicSubflowDescriptor& lhs,
   return lhs.impl_ != rhs.impl_;
 }
 
+bool operator<(const QuicSubflowDescriptor& lhs,
+    const QuicSubflowDescriptor& rhs) {
+  return lhs.impl_ < rhs.impl_;
+}
+
 bool QuicSubflowDescriptor::IsInitialized() const {
   return impl_.IsInitialized();
 }
