@@ -49,27 +49,27 @@ void QuicFramerPeer::SetPerspective(QuicFramer* framer,
 // static
 void QuicFramerPeer::SwapCrypters(QuicFramer* framer1, QuicFramer* framer2) {
   for (int i = ENCRYPTION_NONE; i < NUM_ENCRYPTION_LEVELS; i++) {
-    framer1->encrypter_[i].swap(framer2->encrypter_[i]);
+    framer1->cc_->encrypter_[i].swap(framer2->cc_->encrypter_[i]);
   }
-  framer1->decrypter_.swap(framer2->decrypter_);
-  framer1->alternative_decrypter_.swap(framer2->alternative_decrypter_);
+  framer1->cc_->decrypter_.swap(framer2->cc_->decrypter_);
+  framer1->cc_->alternative_decrypter_.swap(framer2->cc_->alternative_decrypter_);
 
-  EncryptionLevel framer2_level = framer2->decrypter_level_;
-  framer2->decrypter_level_ = framer1->decrypter_level_;
-  framer1->decrypter_level_ = framer2_level;
-  framer2_level = framer2->alternative_decrypter_level_;
-  framer2->alternative_decrypter_level_ = framer1->alternative_decrypter_level_;
-  framer1->alternative_decrypter_level_ = framer2_level;
+  EncryptionLevel framer2_level = framer2->cc_->decrypter_level_;
+  framer2->cc_->decrypter_level_ = framer1->cc_->decrypter_level_;
+  framer1->cc_->decrypter_level_ = framer2_level;
+  framer2_level = framer2->cc_->alternative_decrypter_level_;
+  framer2->cc_->alternative_decrypter_level_ = framer1->cc_->alternative_decrypter_level_;
+  framer1->cc_->alternative_decrypter_level_ = framer2_level;
 
-  const bool framer2_latch = framer2->alternative_decrypter_latch_;
-  framer2->alternative_decrypter_latch_ = framer1->alternative_decrypter_latch_;
-  framer1->alternative_decrypter_latch_ = framer2_latch;
+  const bool framer2_latch = framer2->cc_->alternative_decrypter_latch_;
+  framer2->cc_->alternative_decrypter_latch_ = framer1->cc_->alternative_decrypter_latch_;
+  framer1->cc_->alternative_decrypter_latch_ = framer2_latch;
 }
 
 // static
 QuicEncrypter* QuicFramerPeer::GetEncrypter(QuicFramer* framer,
                                             EncryptionLevel level) {
-  return framer->encrypter_[level].get();
+  return framer->cc_->encrypter_[level].get();
 }
 
 // static

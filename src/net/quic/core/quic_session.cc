@@ -148,6 +148,10 @@ void QuicSession::OnSuccessfulVersionNegotiation(
 
 void QuicSession::OnPathDegrading() {}
 
+void QuicSession::OnAckFrame(const QuicAckFrame& frame) {}
+
+void QuicSession::OnHandshakeComplete() {}
+
 void QuicSession::OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {
   // Stream may be closed by the time we receive a WINDOW_UPDATE, so we can't
   // assume that it still exists.

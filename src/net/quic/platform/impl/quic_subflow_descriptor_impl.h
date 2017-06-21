@@ -29,6 +29,9 @@ public:
   bool IsInitialized() const;
   std::string ToString() const;
 
+  QuicSocketAddress Peer() const { return peer_; }
+  QuicSocketAddress Self() const { return self_; }
+
 private:
   QuicSocketAddress self_, peer_;
 

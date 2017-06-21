@@ -125,9 +125,34 @@ QuicPacketNumberLength ReadSequenceNumberLength(uint8_t flags) {
 
 }  // namespace
 
+QuicFramerCryptoContext::QuicFramerCryptoContext(Perspective perspective)
+:
+  decrypter_level_(ENCRYPTION_NONE),
+  alternative_decrypter_level_(ENCRYPTION_NONE),
+  alternative_decrypter_latch_(false)
+{
+  decrypter_ = QuicMakeUnique<NullDecrypter>(perspective);
+  encrypter_[ENCRYPTION_NONE] = QuicMakeUnique<NullEncrypter>(perspective);
+}
+
+QuicFramerCryptoContext::~QuicFramerCryptoContext() {}
+
 QuicFramer::QuicFramer(const QuicVersionVector& supported_versions,
                        QuicTime creation_time,
                        Perspective perspective)
+    : QuicFramer(supported_versions,
+        creation_time,
+        perspective,
+        new QuicFramerCryptoContext(perspective),
+        true) {
+
+}
+
+QuicFramer::QuicFramer(const QuicVersionVector& supported_versions,
+                       QuicTime creation_time,
+                       Perspective perspective,
+                       QuicFramerCryptoContext *cc,
+                       bool owns_cc)
     : visitor_(nullptr),
       error_(QUIC_NO_ERROR),
       last_packet_number_(0),
@@ -135,20 +160,21 @@ QuicFramer::QuicFramer(const QuicVersionVector& supported_versions,
       last_serialized_connection_id_(0),
       last_version_tag_(0),
       supported_versions_(supported_versions),
-      decrypter_level_(ENCRYPTION_NONE),
-      alternative_decrypter_level_(ENCRYPTION_NONE),
-      alternative_decrypter_latch_(false),
+      cc_(cc),
+      owns_cc_(owns_cc),
       perspective_(perspective),
       validate_flags_(true),
       creation_time_(creation_time),
       last_timestamp_(QuicTime::Delta::Zero()) {
   DCHECK(!supported_versions.empty());
   quic_version_ = supported_versions_[0];
-  decrypter_ = QuicMakeUnique<NullDecrypter>(perspective);
-  encrypter_[ENCRYPTION_NONE] = QuicMakeUnique<NullEncrypter>(perspective);
 }
 
-QuicFramer::~QuicFramer() {}
+QuicFramer::~QuicFramer() {
+  if(owns_cc_) {
+    delete cc_;
+  }
+}
 
 // static
 size_t QuicFramer::GetMinStreamFrameSize(QuicStreamId stream_id,
@@ -1558,32 +1584,32 @@ QuicStringPiece QuicFramer::GetAssociatedDataFromEncryptedPacket(
 }
 
 void QuicFramer::SetDecrypter(EncryptionLevel level, QuicDecrypter* decrypter) {
-  DCHECK(alternative_decrypter_.get() == nullptr);
-  DCHECK_GE(level, decrypter_level_);
-  decrypter_.reset(decrypter);
-  decrypter_level_ = level;
+  DCHECK(cc_->alternative_decrypter_.get() == nullptr);
+  DCHECK_GE(level, cc_->decrypter_level_);
+  cc_->decrypter_.reset(decrypter);
+  cc_->decrypter_level_ = level;
 }
 
 void QuicFramer::SetAlternativeDecrypter(EncryptionLevel level,
                                          QuicDecrypter* decrypter,
                                          bool latch_once_used) {
-  alternative_decrypter_.reset(decrypter);
-  alternative_decrypter_level_ = level;
-  alternative_decrypter_latch_ = latch_once_used;
+  cc_->alternative_decrypter_.reset(decrypter);
+  cc_->alternative_decrypter_level_ = level;
+  cc_->alternative_decrypter_latch_ = latch_once_used;
 }
 
 const QuicDecrypter* QuicFramer::decrypter() const {
-  return decrypter_.get();
+  return cc_->decrypter_.get();
 }
 
 const QuicDecrypter* QuicFramer::alternative_decrypter() const {
-  return alternative_decrypter_.get();
+  return cc_->alternative_decrypter_.get();
 }
 
 void QuicFramer::SetEncrypter(EncryptionLevel level, QuicEncrypter* encrypter) {
   DCHECK_GE(level, 0);
   DCHECK_LT(level, NUM_ENCRYPTION_LEVELS);
-  encrypter_[level].reset(encrypter);
+  cc_->encrypter_[level].reset(encrypter);
 }
 
 size_t QuicFramer::EncryptInPlace(EncryptionLevel level,
@@ -1593,7 +1619,7 @@ size_t QuicFramer::EncryptInPlace(EncryptionLevel level,
                                   size_t buffer_len,
                                   char* buffer) {
   size_t output_length = 0;
-  if (!encrypter_[level]->EncryptPacket(
+  if (!cc_->encrypter_[level]->EncryptPacket(
           quic_version_, packet_number,
           QuicStringPiece(buffer, ad_len),  // Associated data
           QuicStringPiece(buffer + ad_len, total_len - ad_len),  // Plaintext
@@ -1611,7 +1637,7 @@ size_t QuicFramer::EncryptPayload(EncryptionLevel level,
                                   const QuicPacket& packet,
                                   char* buffer,
                                   size_t buffer_len) {
-  DCHECK(encrypter_[level].get() != nullptr);
+  DCHECK(cc_->encrypter_[level].get() != nullptr);
 
   QuicStringPiece associated_data = packet.AssociatedData(quic_version_);
   // Copy in the header, because the encrypter only populates the encrypted
@@ -1620,7 +1646,7 @@ size_t QuicFramer::EncryptPayload(EncryptionLevel level,
   memmove(buffer, associated_data.data(), ad_len);
   // Encrypt the plaintext into the buffer.
   size_t output_length = 0;
-  if (!encrypter_[level]->EncryptPacket(
+  if (!cc_->encrypter_[level]->EncryptPacket(
           quic_version_, packet_number, associated_data,
           packet.Plaintext(quic_version_), buffer + ad_len, &output_length,
           buffer_len - ad_len)) {
@@ -1637,8 +1663,8 @@ size_t QuicFramer::GetMaxPlaintextSize(size_t ciphertext_size) {
   size_t min_plaintext_size = ciphertext_size;
 
   for (int i = ENCRYPTION_NONE; i < NUM_ENCRYPTION_LEVELS; i++) {
-    if (encrypter_[i].get() != nullptr) {
-      size_t size = encrypter_[i]->GetMaxPlaintextSize(ciphertext_size);
+    if (cc_->encrypter_[i].get() != nullptr) {
+      size_t size = cc_->encrypter_[i]->GetMaxPlaintextSize(ciphertext_size);
       if (size < min_plaintext_size) {
         min_plaintext_size = size;
       }
@@ -1655,25 +1681,25 @@ bool QuicFramer::DecryptPayload(QuicDataReader* encrypted_reader,
                                 size_t buffer_length,
                                 size_t* decrypted_length) {
   QuicStringPiece encrypted = encrypted_reader->ReadRemainingPayload();
-  DCHECK(decrypter_.get() != nullptr);
+  DCHECK(cc_->decrypter_.get() != nullptr);
   QuicStringPiece associated_data = GetAssociatedDataFromEncryptedPacket(
       quic_version_, packet, header.public_header.connection_id_length,
       header.public_header.version_flag, header.public_header.nonce != nullptr,
       header.public_header.packet_number_length);
 
-  bool success = decrypter_->DecryptPacket(
+  bool success = cc_->decrypter_->DecryptPacket(
       quic_version_, header.packet_number, associated_data, encrypted,
       decrypted_buffer, decrypted_length, buffer_length);
   if (success) {
-    visitor_->OnDecryptedPacket(decrypter_level_);
-  } else if (alternative_decrypter_.get() != nullptr) {
+    visitor_->OnDecryptedPacket(cc_->decrypter_level_);
+  } else if (cc_->alternative_decrypter_.get() != nullptr) {
     if (header.public_header.nonce != nullptr) {
       DCHECK_EQ(perspective_, Perspective::IS_CLIENT);
-      alternative_decrypter_->SetDiversificationNonce(
+      cc_->alternative_decrypter_->SetDiversificationNonce(
           *header.public_header.nonce);
     }
     bool try_alternative_decryption = true;
-    if (alternative_decrypter_level_ == ENCRYPTION_INITIAL) {
+    if (cc_->alternative_decrypter_level_ == ENCRYPTION_INITIAL) {
       if (perspective_ == Perspective::IS_CLIENT) {
         if (header.public_header.nonce == nullptr) {
           // Can not use INITIAL decryption without a diversification nonce.
@@ -1685,24 +1711,24 @@ bool QuicFramer::DecryptPayload(QuicDataReader* encrypted_reader,
     }
 
     if (try_alternative_decryption) {
-      success = alternative_decrypter_->DecryptPacket(
+      success = cc_->alternative_decrypter_->DecryptPacket(
           quic_version_, header.packet_number, associated_data, encrypted,
           decrypted_buffer, decrypted_length, buffer_length);
     }
     if (success) {
-      visitor_->OnDecryptedPacket(alternative_decrypter_level_);
-      if (alternative_decrypter_latch_) {
+      visitor_->OnDecryptedPacket(cc_->alternative_decrypter_level_);
+      if (cc_->alternative_decrypter_latch_) {
         // Switch to the alternative decrypter and latch so that we cannot
         // switch back.
-        decrypter_ = std::move(alternative_decrypter_);
-        decrypter_level_ = alternative_decrypter_level_;
-        alternative_decrypter_level_ = ENCRYPTION_NONE;
+        cc_->decrypter_ = std::move(cc_->alternative_decrypter_);
+        cc_->decrypter_level_ = cc_->alternative_decrypter_level_;
+        cc_->alternative_decrypter_level_ = ENCRYPTION_NONE;
       } else {
         // Switch the alternative decrypter so that we use it first next time.
-        decrypter_.swap(alternative_decrypter_);
-        EncryptionLevel level = alternative_decrypter_level_;
-        alternative_decrypter_level_ = decrypter_level_;
-        decrypter_level_ = level;
+        cc_->decrypter_.swap(cc_->alternative_decrypter_);
+        EncryptionLevel level = cc_->alternative_decrypter_level_;
+        cc_->alternative_decrypter_level_ = cc_->decrypter_level_;
+        cc_->decrypter_level_ = level;
       }
     }
   }

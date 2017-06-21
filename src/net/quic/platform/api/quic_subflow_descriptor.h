@@ -29,6 +29,8 @@ public:
   std::string ToString() const;
 
   const QuicSubflowDescriptorImpl& impl() const {return impl_;}
+  QuicSocketAddress Peer() const { return impl_.Peer(); }
+  QuicSocketAddress Self() const { return impl_.Self(); }
 
 private:
   QuicSubflowDescriptorImpl impl_;

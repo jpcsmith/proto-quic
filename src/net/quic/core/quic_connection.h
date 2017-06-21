@@ -160,6 +160,11 @@ class QUIC_EXPORT_PRIVATE QuicConnectionVisitorInterface {
   // Called to ask if any streams are open in this visitor, excluding the
   // reserved crypto and headers stream.
   virtual bool HasOpenDynamicStreams() const = 0;
+
+  // Called whenever an ACK frame is received
+  virtual void OnAckFrame(const QuicAckFrame& frame) = 0;
+
+  virtual void OnHandshakeComplete() = 0;
 };
 
 // Interface which gets callbacks from the QuicConnection at interesting
@@ -315,7 +320,29 @@ class QUIC_EXPORT_PRIVATE QuicConnection
                  bool owns_writer,
                  Perspective perspective,
                  const QuicVersionVector& supported_versions);
+  QuicConnection(QuicConnectionId connection_id,
+                 QuicSocketAddress address,
+                 QuicConnectionHelperInterface* helper,
+                 QuicAlarmFactory* alarm_factory,
+                 QuicPacketWriter* writer,
+                 bool owns_writer,
+                 Perspective perspective,
+                 const QuicVersionVector& supported_versions,
+                 QuicFramer *framer,
+                 bool owns_framer,
+                 bool do_not_perform_handshake);
   ~QuicConnection() override;
+
+  // Creates a connection for a new subflow connected to |address|. The new
+  // connection will have the same encrypters and decrypters.
+  QuicConnection *CloneToSubflow(
+      QuicSocketAddress address,
+      QuicPacketWriter *writer,
+      bool owns_writer);
+
+  // Set the ownership of the QuicFramer
+  void SetOwnsFramer(bool owns_framer) { owns_framer_ = owns_framer; }
+  QuicFramer *Framer() { return framer_; }
 
   // Sets connection parameters from the supplied |config|.
   void SetFromConfig(const QuicConfig& config);
@@ -389,6 +416,9 @@ class QUIC_EXPORT_PRIVATE QuicConnection
                                 const QuicSocketAddress& peer_address,
                                 const QuicReceivedPacket& packet);
 
+  void StopSendingNewSubflowFrame() { should_send_new_subflow_frame_ = false; }
+  void SendNewSubflowFrameInEveryPacket() { should_send_new_subflow_frame_ = true; }
+
   // QuicBlockedWriterInterface
   // Called when the underlying connection becomes writable to allow queued
   // writes to happen.
@@ -419,11 +449,11 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   void SetSelfAddress(QuicSocketAddress address) { self_address_ = address; }
 
   // The version of the protocol this connection is using.
-  QuicVersion version() const { return framer_.version(); }
+  QuicVersion version() const { return framer_->version(); }
 
   // The versions of the protocol that this connection supports.
   const QuicVersionVector& supported_versions() const {
-    return framer_.supported_versions();
+    return framer_->supported_versions();
   }
 
   // From QuicFramerVisitorInterface
@@ -628,6 +658,7 @@ class QUIC_EXPORT_PRIVATE QuicConnection
     ~ScopedPacketBundler();
 
    private:
+
     bool ShouldSendAck(AckBundling ack_mode) const;
 
     QuicConnection* connection_;
@@ -652,6 +683,9 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   QuicPacketWriter* writer() { return writer_; }
   const QuicPacketWriter* writer() const { return writer_; }
 
+  // Sends a new packet containing a single NEW_SUBFLOW frame
+  void SendNewSubflowPacket(QuicSubflowId id);
+
   // Sends an MTU discovery packet of size |target_mtu|.  If the packet is
   // acknowledged by the peer, the maximum packet size will be increased to
   // |target_mtu|.
@@ -662,9 +696,9 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   void DiscoverMtu();
 
   // Return the name of the cipher of the primary decrypter of the framer.
-  const char* cipher_name() const { return framer_.decrypter()->cipher_name(); }
+  const char* cipher_name() const { return framer_->decrypter()->cipher_name(); }
   // Return the id of the cipher of the primary decrypter of the framer.
-  uint32_t cipher_id() const { return framer_.decrypter()->cipher_id(); }
+  uint32_t cipher_id() const { return framer_->decrypter()->cipher_id(); }
 
   std::vector<std::unique_ptr<QuicEncryptedPacket>>* termination_packets() {
     return termination_packets_.get();
@@ -851,7 +885,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   // congestion controller if it is the case.
   void CheckIfApplicationLimited();
 
-  QuicFramer framer_;
+  QuicFramer *framer_; // Owned or not depending on |owns_framer_|.
+  bool owns_framer_;
   QuicConnectionHelperInterface* helper_;  // Not owned.
   QuicAlarmFactory* alarm_factory_;        // Not owned.
   PerPacketOptions* per_packet_options_;   // Not owned.
@@ -1095,6 +1130,11 @@ class QUIC_EXPORT_PRIVATE QuicConnection
 
   // Consecutive number of sent packets which have no retransmittable frames.
   size_t consecutive_num_packets_with_no_retransmittable_frames_;
+
+  // If this flag is set, the connection will send a NEW_SUBFLOW frame at the
+  // beginning of every packet. As soon as the peer receives an ACK for any
+  // packet on this subflow, he can stop transmitting NEW_SUBFLOW frames.
+  bool should_send_new_subflow_frame_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnection);
 };

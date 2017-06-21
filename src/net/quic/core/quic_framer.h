@@ -147,6 +147,28 @@ class QUIC_EXPORT_PRIVATE QuicFramerVisitorInterface {
   virtual void OnPacketComplete() = 0;
 };
 
+// Stores the decrypters and encrypters for a session.
+class QUIC_EXPORT_PRIVATE QuicFramerCryptoContext {
+public:
+  QuicFramerCryptoContext(Perspective perspective);
+  ~QuicFramerCryptoContext();
+
+  // Primary decrypter used to decrypt packets during parsing.
+  std::unique_ptr<QuicDecrypter> decrypter_;
+  // Alternative decrypter that can also be used to decrypt packets.
+  std::unique_ptr<QuicDecrypter> alternative_decrypter_;
+  // The encryption level of |decrypter_|.
+  EncryptionLevel decrypter_level_;
+  // The encryption level of |alternative_decrypter_|.
+  EncryptionLevel alternative_decrypter_level_;
+  // |alternative_decrypter_latch_| is true if, when |alternative_decrypter_|
+  // successfully decrypts a packet, we should install it as the only
+  // decrypter.
+  bool alternative_decrypter_latch_;
+  // Encrypters used to encrypt packets via EncryptPayload().
+  std::unique_ptr<QuicEncrypter> encrypter_[NUM_ENCRYPTION_LEVELS];
+};
+
 // Class for parsing and constructing QUIC packets.  It has a
 // QuicFramerVisitorInterface that is called when packets are parsed.
 class QUIC_EXPORT_PRIVATE QuicFramer {
@@ -158,6 +180,13 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   QuicFramer(const QuicVersionVector& supported_versions,
              QuicTime creation_time,
              Perspective perspective);
+
+  // Same as above but uses a QuicFramerCryptoContext object which is owned by the caller
+  QuicFramer(const QuicVersionVector& supported_versions,
+             QuicTime creation_time,
+             Perspective perspective,
+             QuicFramerCryptoContext *cc,
+             bool owns_cc);
 
   virtual ~QuicFramer();
 
@@ -299,6 +328,10 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // Changes the encrypter used for level |level| to |encrypter|. The function
   // takes ownership of |encrypter|.
   void SetEncrypter(EncryptionLevel level, QuicEncrypter* encrypter);
+
+  QuicFramerCryptoContext* CryptoContext() {
+    return cc_;
+  }
 
   // Encrypts a payload in |buffer|.  |ad_len| is the length of the associated
   // data. |total_len| is the length of the associated data plus plaintext.
@@ -519,20 +552,10 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // element, with subsequent elements in descending order (versions can be
   // skipped as necessary).
   QuicVersionVector supported_versions_;
-  // Primary decrypter used to decrypt packets during parsing.
-  std::unique_ptr<QuicDecrypter> decrypter_;
-  // Alternative decrypter that can also be used to decrypt packets.
-  std::unique_ptr<QuicDecrypter> alternative_decrypter_;
-  // The encryption level of |decrypter_|.
-  EncryptionLevel decrypter_level_;
-  // The encryption level of |alternative_decrypter_|.
-  EncryptionLevel alternative_decrypter_level_;
-  // |alternative_decrypter_latch_| is true if, when |alternative_decrypter_|
-  // successfully decrypts a packet, we should install it as the only
-  // decrypter.
-  bool alternative_decrypter_latch_;
-  // Encrypters used to encrypt packets via EncryptPayload().
-  std::unique_ptr<QuicEncrypter> encrypter_[NUM_ENCRYPTION_LEVELS];
+  // Crypto related objects such as QuicDecrypter and QuicEncrypter
+  QuicFramerCryptoContext *cc_;
+  // Whether the framer owns the QuicFramerCryptoContext object
+  bool owns_cc_;
   // Tracks if the framer is being used by the entity that received the
   // connection or the entity that initiated it.
   Perspective perspective_;
