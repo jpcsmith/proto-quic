@@ -448,6 +448,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   bool OnGoAwayFrame(const QuicGoAwayFrame& frame) override;
   bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
   bool OnBlockedFrame(const QuicBlockedFrame& frame) override;
+  bool OnNewSubflowFrame(const QuicNewSubflowFrame& frame) override;
+  bool OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override;
   void OnPacketComplete() override;
 
   // QuicConnectionCloseDelegateInterface
@@ -690,6 +692,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   const QuicSocketAddress& last_packet_source_address() const {
     return last_packet_source_address_;
   }
+
+  virtual void OnHandshakeEncryptionEstablished();
 
  protected:
   // Calls cancel() on all the alarms owned by this connection.

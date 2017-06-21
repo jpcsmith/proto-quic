@@ -52,6 +52,8 @@ const uint8_t kPublicHeaderSequenceNumberShift = 4;
 // GoAway             : 0b 00000011 (0x03)
 // WindowUpdate       : 0b 00000100 (0x04)
 // Blocked            : 0b 00000101 (0x05)
+// NewSubflow         : 0b 00001000 (0x08)
+// SubflowClose       : 0b 00001001 (0x09)
 //
 // Special Frame Types encode both a Frame Type and corresponding flags
 // all in the Frame Type byte. Currently defined Special Frame Types are:
@@ -162,7 +164,7 @@ size_t QuicFramer::GetMinAckFrameSize(
     QuicVersion version,
     QuicPacketNumberLength largest_observed_length) {
   size_t min_size = kQuicFrameTypeSize + largest_observed_length +
-                    kQuicDeltaTimeLargestObservedSize;
+                    kQuicDeltaTimeLargestObservedSize + kQuicSubflowIdSize;
   return min_size + kQuicNumTimestampsSize;
 }
 
@@ -199,6 +201,16 @@ size_t QuicFramer::GetWindowUpdateFrameSize() {
 // static
 size_t QuicFramer::GetBlockedFrameSize() {
   return kQuicFrameTypeSize + kQuicMaxStreamIdSize;
+}
+
+// static
+size_t QuicFramer::GetNewSubflowFrameSize() {
+  return kQuicFrameTypeSize + kQuicSubflowIdSize;
+}
+
+// static
+size_t QuicFramer::GetSubflowCloseFrameSize() {
+  return kQuicFrameTypeSize + kQuicSubflowIdSize;
 }
 
 // static
@@ -389,6 +401,18 @@ size_t QuicFramer::BuildDataPacket(const QuicPacketHeader& header,
       case BLOCKED_FRAME:
         if (!AppendBlockedFrame(*frame.blocked_frame, &writer)) {
           QUIC_BUG << "AppendBlockedFrame failed";
+          return 0;
+        }
+        break;
+      case NEW_SUBFLOW_FRAME:
+        if (!AppendNewSubflowFrame(*frame.new_subflow_frame, &writer)) {
+          QUIC_BUG << "AppendNewSubflowFrame failed";
+          return 0;
+        }
+        break;
+      case SUBFLOW_CLOSE_FRAME:
+        if (!AppendSubflowCloseFrame(*frame.subflow_close_frame, &writer)) {
+          QUIC_BUG << "AppendSubflowCloseFrame failed";
           return 0;
         }
         break;
@@ -1099,6 +1123,34 @@ bool QuicFramer::ProcessFrameData(QuicDataReader* reader,
         continue;
       }
 
+      case NEW_SUBFLOW_FRAME: {
+        QuicNewSubflowFrame new_subflow_frame;
+        if (!ProcessNewSubflowFrame(reader, &new_subflow_frame)) {
+          return RaiseError(QUIC_INVALID_NEW_SUBFLOW_DATA);
+        }
+        if (!visitor_->OnNewSubflowFrame(new_subflow_frame)) {
+          QUIC_DVLOG(1) << ENDPOINT
+                        << "Visitor asked to stop further processing.";
+          // Returning true since there was no parsing error.
+          return true;
+        }
+        continue;
+      }
+
+      case SUBFLOW_CLOSE_FRAME: {
+        QuicSubflowCloseFrame subflow_close_frame;
+        if (!ProcessSubflowCloseFrame(reader, &subflow_close_frame)) {
+          return RaiseError(QUIC_INVALID_SUBFLOW_CLOSE_DATA);
+        }
+        if (!visitor_->OnSubflowCloseFrame(subflow_close_frame)) {
+          QUIC_DVLOG(1) << ENDPOINT
+                        << "Visitor asked to stop further processing.";
+          // Returning true since there was no parsing error.
+          return true;
+        }
+        continue;
+      }
+
       case STOP_WAITING_FRAME: {
         QuicStopWaitingFrame stop_waiting_frame;
         if (!ProcessStopWaitingFrame(reader, header, &stop_waiting_frame)) {
@@ -1204,6 +1256,12 @@ bool QuicFramer::ProcessAckFrame(QuicDataReader* reader,
   frame_type >>= kQuicSequenceNumberLengthShift;
   frame_type >>= kQuicHasMultipleAckBlocksShift;
   bool has_ack_blocks = frame_type & kQuicHasMultipleAckBlocksMask;
+
+  if (!reader->ReadUInt32(&ack_frame->subflow_id))
+  {
+	  set_detailed_error("Unable to read subflow id.");
+	  return false;
+  }
 
   if (!reader->ReadBytesToUInt64(largest_acked_length,
                                  &ack_frame->largest_observed)) {
@@ -1440,6 +1498,26 @@ bool QuicFramer::ProcessBlockedFrame(QuicDataReader* reader,
                                      QuicBlockedFrame* frame) {
   if (!reader->ReadUInt32(&frame->stream_id)) {
     set_detailed_error("Unable to read stream_id.");
+    return false;
+  }
+
+  return true;
+}
+
+bool QuicFramer::ProcessNewSubflowFrame(QuicDataReader* reader,
+                                     QuicNewSubflowFrame* frame) {
+  if (!reader->ReadUInt32(&frame->subflow_id)) {
+    set_detailed_error("Unable to read subflow_id.");
+    return false;
+  }
+
+  return true;
+}
+
+bool QuicFramer::ProcessSubflowCloseFrame(QuicDataReader* reader,
+                                     QuicSubflowCloseFrame* frame) {
+  if (!reader->ReadUInt32(&frame->subflow_id)) {
+    set_detailed_error("Unable to read subflow_id.");
     return false;
   }
 
@@ -1703,6 +1781,10 @@ size_t QuicFramer::ComputeFrameLength(
       return GetWindowUpdateFrameSize();
     case BLOCKED_FRAME:
       return GetBlockedFrameSize();
+    case NEW_SUBFLOW_FRAME:
+      return GetNewSubflowFrameSize();
+    case SUBFLOW_CLOSE_FRAME:
+      return GetSubflowCloseFrameSize();
     case PADDING_FRAME:
       DCHECK(false);
       return 0;
@@ -1869,6 +1951,11 @@ bool QuicFramer::AppendAckFrameAndTypeByte(const QuicAckFrame& frame,
 
   if (!writer->WriteUInt8(type_byte)) {
     return false;
+  }
+
+  // Subflow id (for now just send subflow id stored in QuicConnection)
+  if (!writer->WriteUInt32(frame.subflow_id)) {
+	  return false;
   }
 
   // Largest acked.
@@ -2136,6 +2223,24 @@ bool QuicFramer::AppendBlockedFrame(const QuicBlockedFrame& frame,
                                     QuicDataWriter* writer) {
   uint32_t stream_id = static_cast<uint32_t>(frame.stream_id);
   if (!writer->WriteUInt32(stream_id)) {
+    return false;
+  }
+  return true;
+}
+
+bool QuicFramer::AppendNewSubflowFrame(const QuicNewSubflowFrame& frame,
+                                    QuicDataWriter* writer) {
+  uint32_t subflow_id = static_cast<uint32_t>(frame.subflow_id);
+  if (!writer->WriteUInt32(subflow_id)) {
+    return false;
+  }
+  return true;
+}
+
+bool QuicFramer::AppendSubflowCloseFrame(const QuicSubflowCloseFrame& frame,
+                                    QuicDataWriter* writer) {
+  uint32_t subflow_id = static_cast<uint32_t>(frame.subflow_id);
+  if (!writer->WriteUInt32(subflow_id)) {
     return false;
   }
   return true;

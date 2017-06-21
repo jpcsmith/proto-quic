@@ -69,6 +69,9 @@ class QUIC_EXPORT_PRIVATE QuicReceivedPacketManager {
     max_ack_ranges_ = max_ack_ranges;
   }
 
+  void setSubflowId(uint32_t id) { ack_frame_.subflow_id = id; }
+  uint32_t getSubflowId() { return ack_frame_.subflow_id; }
+
  private:
   friend class test::QuicConnectionPeer;
 

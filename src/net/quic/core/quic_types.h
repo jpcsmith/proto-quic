@@ -19,6 +19,7 @@ namespace net {
 typedef uint16_t QuicPacketLength;
 typedef uint32_t QuicHeaderId;
 typedef uint32_t QuicStreamId;
+typedef uint32_t QuicSubflowId;
 typedef uint64_t QuicByteCount;
 typedef uint64_t QuicConnectionId;
 typedef uint64_t QuicPacketCount;
@@ -121,6 +122,8 @@ enum QuicFrameType {
   BLOCKED_FRAME = 5,
   STOP_WAITING_FRAME = 6,
   PING_FRAME = 7,
+  NEW_SUBFLOW_FRAME = 8,
+  SUBFLOW_CLOSE_FRAME = 9,
 
   // STREAM and ACK frames are special frames. They are encoded differently on
   // the wire and their values do not need to be stable.

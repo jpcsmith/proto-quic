@@ -146,6 +146,8 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   bool OnGoAwayFrame(const QuicGoAwayFrame& frame) override;
   bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
   bool OnBlockedFrame(const QuicBlockedFrame& frame) override;
+  bool OnNewSubflowFrame(const QuicNewSubflowFrame& frame) override;
+  bool OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override;
   void OnPacketComplete() override;
 
   // QuicBufferedPacketStore::VisitorInterface implementation.

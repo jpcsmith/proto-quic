@@ -41,6 +41,8 @@ const size_t kQuicMaxStreamIdSize = 4;
 const size_t kQuicMaxStreamOffsetSize = 8;
 // Number of bytes reserved to store payload length in stream frame.
 const size_t kQuicStreamPayloadLengthSize = 2;
+// Number of bytes reserved for subflow id.
+const size_t kQuicSubflowIdSize = 4;
 
 // Size in bytes reserved for the delta time of the largest observed
 // packet number in ack frames.
@@ -135,6 +137,12 @@ class QUIC_EXPORT_PRIVATE QuicFramerVisitorInterface {
   // Called when a BlockedFrame has been parsed.
   virtual bool OnBlockedFrame(const QuicBlockedFrame& frame) = 0;
 
+  // Called when a NewSubflowFrame has been parsed.
+  virtual bool OnNewSubflowFrame(const QuicNewSubflowFrame& frame) = 0;
+
+  // Called when a SubflowCloseFrame has been parsed.
+  virtual bool OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) = 0;
+
   // Called when a packet has been completely processed.
   virtual void OnPacketComplete() = 0;
 };
@@ -215,6 +223,10 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   static size_t GetStreamOffsetSize(QuicStreamOffset offset);
   // Size in bytes required for a serialized version negotiation packet
   static size_t GetVersionNegotiationPacketSize(size_t number_versions);
+  // Size in bytes of all NewSubflow frame fields.
+  static size_t GetNewSubflowFrameSize();
+  // Size in bytes of all SubflowClose frame fields.
+  static size_t GetSubflowCloseFrameSize();
 
   // Returns the number of bytes added to the packet for the specified frame,
   // and 0 if the frame doesn't fit.  Includes the header size for the first
@@ -395,6 +407,8 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
                                 QuicWindowUpdateFrame* frame);
   bool ProcessBlockedFrame(QuicDataReader* reader, QuicBlockedFrame* frame);
   void ProcessPaddingFrame(QuicDataReader* reader, QuicPaddingFrame* frame);
+  bool ProcessNewSubflowFrame(QuicDataReader* reader, QuicNewSubflowFrame* frame);
+  bool ProcessSubflowCloseFrame(QuicDataReader* reader, QuicSubflowCloseFrame* frame);
 
   bool DecryptPayload(QuicDataReader* encrypted_reader,
                       const QuicPacketHeader& header,
@@ -473,6 +487,10 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   bool AppendWindowUpdateFrame(const QuicWindowUpdateFrame& frame,
                                QuicDataWriter* writer);
   bool AppendBlockedFrame(const QuicBlockedFrame& frame,
+                          QuicDataWriter* writer);
+  bool AppendNewSubflowFrame(const QuicNewSubflowFrame& frame,
+                          QuicDataWriter* writer);
+  bool AppendSubflowCloseFrame(const QuicSubflowCloseFrame& frame,
                           QuicDataWriter* writer);
   bool AppendPaddingFrame(const QuicPaddingFrame& frame,
                           QuicDataWriter* writer);
