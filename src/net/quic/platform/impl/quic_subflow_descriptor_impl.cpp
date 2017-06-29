@@ -40,7 +40,7 @@ bool QuicSubflowDescriptorImpl::IsInitialized() const {
 std::string QuicSubflowDescriptorImpl::ToString() const {
   if(!initialized_)
     return "Uninitialized subflow descriptor";
-  return "{ Self address: "+peer_.ToString()+ " Peer address: "+peer_.ToString()+" }";
+  return "{ Self address: "+self_.ToString()+ " Peer address: "+peer_.ToString()+" }";
 }
 
 } /* namespace net */

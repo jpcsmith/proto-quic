@@ -182,11 +182,13 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
              Perspective perspective);
 
   // Same as above but uses a QuicFramerCryptoContext object which is owned by the caller
+  // and sets the QuicVersion to a specific value.
   QuicFramer(const QuicVersionVector& supported_versions,
              QuicTime creation_time,
              Perspective perspective,
              QuicFramerCryptoContext *cc,
-             bool owns_cc);
+             bool owns_cc,
+             QuicVersion version);
 
   virtual ~QuicFramer();
 

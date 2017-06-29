@@ -2928,6 +2928,10 @@ if (is_linux) {
       "tools/quic/platform/impl/quic_socket_utils.h",
       "tools/quic/quic_client.cc",
       "tools/quic/quic_client.h",
+      "tools/quic/quic_multipath_client.cc",
+      "tools/quic/quic_multipath_client.h",
+      "tools/quic/quic_multipath_server.cc",
+      "tools/quic/quic_multipath_server.h",
       "tools/quic/quic_default_packet_writer.cc",
       "tools/quic/quic_default_packet_writer.h",
       "tools/quic/quic_epoll_alarm_factory.cc",
@@ -2971,6 +2975,36 @@ if (is_linux) {
   executable("epoll_quic_server") {
     sources = [
       "tools/quic/quic_server_bin.cc",
+    ]
+    deps = [
+      ":epoll_quic_tools",
+      ":epoll_server",
+      ":net",
+      ":simple_quic_tools",
+      "//base",
+      "//build/config:exe_and_shlib_deps",
+      "//third_party/boringssl",
+    ]
+  }
+
+  executable("quic_multipath_client") {
+    sources = [
+      "tools/quic/quic_multipath_client_bin.cc",
+    ]
+    deps = [
+      ":epoll_quic_tools",
+      ":epoll_server",
+      ":net",
+      ":simple_quic_tools",
+      "//base",
+      "//build/config:exe_and_shlib_deps",
+      "//third_party/boringssl",
+    ]
+  }
+
+  executable("quic_multipath_server") {
+    sources = [
+      "tools/quic/quic_multipath_server_bin.cc",
     ]
     deps = [
       ":epoll_quic_tools",

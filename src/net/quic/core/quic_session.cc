@@ -152,6 +152,8 @@ void QuicSession::OnAckFrame(const QuicAckFrame& frame) {}
 
 void QuicSession::OnHandshakeComplete() {}
 
+void QuicSession::OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) {}
+
 void QuicSession::OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {
   // Stream may be closed by the time we receive a WINDOW_UPDATE, so we can't
   // assume that it still exists.
@@ -605,6 +607,7 @@ void QuicSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
       // Discard originally encrypted packets, since they can't be decrypted by
       // the peer.
       connection()->NeuterUnencryptedPackets();
+      connection_manager()->OnHandshakeComplete();
       break;
 
     default:

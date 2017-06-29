@@ -3,18 +3,26 @@
 // found in the LICENSE file.
 
 #include "net/quic/core/quic_connection_manager.h"
+#include "net/quic/core/quic_connection.h"
+
 #include <utility>
+#include "net/quic/core/quic_packet_generator.h"
+#include "net/quic/core/quic_packet_creator.h"
 
 namespace net {
 
 QuicConnectionManager::QuicConnectionManager(QuicConnection *connection)
     : connections_(std::map<QuicSubflowId, QuicConnection*>()),
       next_outgoing_subflow_id_(connection->perspective() == Perspective::IS_SERVER ? 2 : 3),
-      packet_handler_(nullptr) {
-  connections_.insert(
-      std::pair<QuicSubflowId, QuicConnection*>(kInitialSubflowId,
-          connection));
+      packet_handler_(nullptr),
+      current_subflow_id_(kInitialSubflowId) {
+  AddConnection(connection->SubflowDescriptor(), kInitialSubflowId, connection);
   connection->set_visitor(this);
+  // if the connection has already established keys, we can start accepting new
+  // subflows right away.
+  if(connection->SubflowState() == QuicConnection::SUBFLOW_OPEN) {
+    InitializeSubflowPacketHandler();
+  }
 }
 
 QuicConnectionManager::~QuicConnectionManager() {
@@ -33,7 +41,6 @@ QuicConnectionManager::~QuicConnectionManager() {
 }
 
 void QuicConnectionManager::TryAddingSubflow(QuicSubflowDescriptor descriptor) {
-
   // Check if the initial connection already finished its handshake messages
   if(packet_handler_ == nullptr) {
     buffered_outgoing_subflow_attempts_.insert(descriptor);
@@ -45,36 +52,48 @@ void QuicConnectionManager::TryAddingSubflow(QuicSubflowDescriptor descriptor) {
   //TODO maybe send ping packet to open connection?
 }
 
+void QuicConnectionManager::AddPacketWriter(QuicSubflowDescriptor descriptor, QuicPacketWriter *writer) {
+  packet_writer_map_[descriptor] = writer;
+}
+
 void QuicConnectionManager::CloseSubflow(QuicSubflowId id) {
-  //TODO maybe similar to opening: Send subflow_close frames until one is acknowledged.
-  CloseConnection(id);
+  CloseConnection(id,SUBFLOW_OUTGOING);
 }
 
 void QuicConnectionManager::ProcessUdpPacket(const QuicSocketAddress& self_address,
                                    const QuicSocketAddress& peer_address,
                                    const QuicReceivedPacket& packet) {
   QuicSubflowDescriptor descriptor(self_address,peer_address);
+  QUIC_LOG(INFO) << "ProcessUdpPacket(" << self_address.ToString() << ", " << peer_address.ToString() << ")";
+  QUIC_LOG(INFO) << "subflow descriptor map entries:";
+  for(auto it = subflow_descriptor_map_.begin(); it != subflow_descriptor_map_.end(); ++it) {
+    QUIC_LOG(INFO) << "subflow descriptor=" << it->first.ToString() << " subflow id=" << it->second;
+  }
   auto it = subflow_descriptor_map_.find(descriptor);
 
   // subflow already established
   if(it != subflow_descriptor_map_.end())
   {
+    QUIC_LOG(INFO) << "Packet on subflow (" << QuicSubflowDescriptor(self_address,peer_address).ToString() << "): Forwarded to connection";
     connections_[it->second]->ProcessUdpPacket(self_address,peer_address,packet);
   }
   else
   {
     if(packet_handler_ == nullptr) {
+      QUIC_LOG(INFO) << "Packet on subflow (" << QuicSubflowDescriptor(self_address,peer_address).ToString() << "): Buffered";
       // handshake not yet finished -> buffer request
       buffered_incoming_subflow_attempts_.push_back(
           std::pair<QuicSubflowDescriptor,std::unique_ptr<QuicReceivedPacket>>(
               QuicSubflowDescriptor(self_address,peer_address),packet.Clone()));
     } else {
       if(!packet_handler_->ProcessPacket(packet)) {
+        QUIC_LOG(INFO) << "Packet on subflow (" << QuicSubflowDescriptor(self_address,peer_address).ToString() << "): Error (Cannot accept new subflow)";
         //TODO error handling
         return;
       }
       else
       {
+        QUIC_LOG(INFO) << "Packet on subflow (" << QuicSubflowDescriptor(self_address,peer_address).ToString() << "): New incoming subflow (" << packet_handler_->GetLastSubflowId() << ")";
         //TODO check for validity of subflow id (not too big?)
         OpenConnection(
             QuicSubflowDescriptor(self_address,peer_address),
@@ -98,13 +117,26 @@ void QuicConnectionManager::OpenConnection(QuicSubflowDescriptor descriptor, Qui
 
   // Create new connection
   QuicConnection *connection = InitialConnection()->CloneToSubflow(
-      descriptor.Peer(),
-      CreatePacketWriter(),
-      true);
+      descriptor,
+      GetPacketWriter(descriptor),
+      false,
+      subflowId);
+  connection->set_visitor(this);
+
+  // Set the SubflowState depending on the SubflowDirection
   if(direction == SUBFLOW_OUTGOING) {
-    connection->SendNewSubflowFrameInEveryPacket();
+    connection->SetSubflowState(QuicConnection::SUBFLOW_OPEN_INITIATED);
+    // Add NEW_SUBFLOW frame to every packet
+    connection->PrependNewSubflowFrame(subflowId);
+  } else {
+    connection->SetSubflowState(QuicConnection::SUBFLOW_OPEN);
   }
 
+  AddConnection(descriptor,subflowId,connection);
+}
+
+void QuicConnectionManager::AddConnection(QuicSubflowDescriptor descriptor, QuicSubflowId subflowId, QuicConnection *connection) {
+  QUIC_LOG(INFO) << "Add connection: subflowId = " << subflowId << " subflowDescriptor = " << descriptor.ToString();
   connections_.insert(
       std::pair<QuicSubflowId, QuicConnection*>(
           subflowId,
@@ -113,9 +145,25 @@ void QuicConnectionManager::OpenConnection(QuicSubflowDescriptor descriptor, Qui
       std::pair<QuicSubflowDescriptor, QuicSubflowId>(
           descriptor,
           subflowId));
+  //connection->sent_packet_manager().SetSubflowId(subflowId);
 }
 
-void QuicConnectionManager::CloseConnection(QuicSubflowId subflowId) {
+void QuicConnectionManager::CloseConnection(QuicSubflowId subflowId, SubflowDirection direction) {
+  QuicConnection *connection = connections_[subflowId];
+  if(direction == SUBFLOW_INCOMING) {
+    connection->RemovePrependedFrames();
+    connection->SetSubflowState(QuicConnection::SUBFLOW_CLOSED);
+  } else {
+    // Send connection close frame on this subflow.
+    // TODO send on any subflow?
+    connection->PrependSubflowCloseFrame(subflowId);
+    connection->SetSubflowState(QuicConnection::SUBFLOW_CLOSE_INITIATED);
+  }
+
+  RemoveConnection(subflowId);
+}
+
+void QuicConnectionManager::RemoveConnection(QuicSubflowId subflowId) {
   // remove connection
   connections_.erase(subflowId);
 
@@ -134,10 +182,18 @@ void QuicConnectionManager::CloseConnection(QuicSubflowId subflowId) {
   }
 }
 
-QuicPacketWriter *QuicConnectionManager::CreatePacketWriter() {
-  // E.g. Use QuicPerConnectionPacketWriter
-  // Or take writer from first InitialConnection and share among connections
-  return nullptr;
+QuicPacketWriter *QuicConnectionManager::GetPacketWriter(QuicSubflowDescriptor descriptor) {
+  return packet_writer_map_[descriptor];
+}
+
+void QuicConnectionManager::InitializeSubflowPacketHandler() {
+  packet_handler_ = new QuicSubflowPacketHandler(
+        InitialConnection()->supported_versions(),
+        InitialConnection()->helper()->GetClock()->ApproximateNow(), //TODO use same creation time for all framers?
+        InitialConnection()->perspective(),
+        InitialConnection()->Framer()->CryptoContext(),
+        false,
+        InitialConnection()->Framer()->version());
 }
 
 QuicSubflowId QuicConnectionManager::GetNextOutgoingSubflowId() {
@@ -163,6 +219,10 @@ void QuicConnectionManager::OnGoAway(const QuicGoAwayFrame& frame) {
 }
 void QuicConnectionManager::OnConnectionClosed(QuicErrorCode error,
     const std::string& error_details, ConnectionCloseSource source) {
+  for(auto it = connections_.begin(); it != connections_.end(); ++it) {
+    // No need to notify visitor
+    it->second->TearDownLocalConnectionState(error,error_details,source,false);
+  }
   if(visitor_ != nullptr) visitor_->OnConnectionClosed(error,error_details,source);
 }
 void QuicConnectionManager::OnWriteBlocked() {
@@ -204,20 +264,31 @@ bool QuicConnectionManager::HasOpenDynamicStreams() const {
 void QuicConnectionManager::OnAckFrame(const QuicAckFrame& frame) {
   auto it = connections_.find(frame.subflow_id);
   if(it != connections_.end()) {
+    QuicConnection *connection = it->second;
+    if(connection->SubflowState() == QuicConnection::SUBFLOW_OPEN_INITIATED) {
     // Acknowledge that a packet was received on the subflow, so we can
     // stop sending a NEW_SUBFLOW frame in every packet.
-    it->second->StopSendingNewSubflowFrame();
+      connection->RemovePrependedFrames();
+      connection->SetSubflowState(QuicConnection::SUBFLOW_OPEN);
+    } else if(connection->SubflowState() == QuicConnection::SUBFLOW_OPEN) {
+      // ignore
+    } else if(connection->SubflowState() == QuicConnection::SUBFLOW_CLOSE_INITIATED && connection->SubflowCloseFrameReceived(frame.largest_observed)) {
+      // Stop sending SUBFLOW_CLOSE frames //TODO necessary?
+      connection->RemovePrependedFrames();
+      connection->SetSubflowState(QuicConnection::SUBFLOW_CLOSED);
+    } else if(connection->SubflowState() == QuicConnection::SUBFLOW_CLOSED) {
+      // ignore
+    }
+  } else {
+    //TODO error handling
   }
 }
 void QuicConnectionManager::OnHandshakeComplete() {
   // As soon as we have our keys set up, we can set up our QuicFramer
   // to decrypt/decode incoming and encrypt/encode outgoing subflow requests
-  packet_handler_ = new QuicSubflowPacketHandler(
-      InitialConnection()->supported_versions(),
-      InitialConnection()->helper()->GetClock()->ApproximateNow(),
-      InitialConnection()->perspective(),
-      InitialConnection()->Framer()->CryptoContext(),
-      false);
+  InitializeSubflowPacketHandler();
+
+  InitialConnection()->SetSubflowState(QuicConnection::SUBFLOW_OPEN);
 
   // Add outgoing subflows
   for(const QuicSubflowDescriptor& descriptor: buffered_outgoing_subflow_attempts_) {
@@ -234,15 +305,24 @@ void QuicConnectionManager::OnHandshakeComplete() {
   }
   buffered_incoming_subflow_attempts_.clear();
 }
+void QuicConnectionManager::OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) {
+  auto it = connections_.find(frame.subflow_id);
+    if(it != connections_.end()) {
+      QuicConnection *connection = it->second;
+      connection->SetSubflowState(QuicConnection::SUBFLOW_CLOSED);
+    } else {
+      //TODO error handling
+    }
+}
 
 
 // QuicSubflowPacketHandler
 void QuicConnectionManager::QuicSubflowPacketHandler::OnPacket() {}
 bool QuicConnectionManager::QuicSubflowPacketHandler::OnUnauthenticatedPublicHeader(
     const QuicPacketPublicHeader& header) { return true; }
-bool QuicConnectionManager::QuicSubflowPacketHandler::OnUnauthenticatedHeader(const QuicPacketHeader& header) {return true;}
+bool QuicConnectionManager::QuicSubflowPacketHandler::OnUnauthenticatedHeader(const QuicPacketHeader& header) { return true;}
 void QuicConnectionManager::QuicSubflowPacketHandler::OnError(QuicFramer* framer) {}
-bool QuicConnectionManager::QuicSubflowPacketHandler::OnProtocolVersionMismatch(QuicVersion received_version) {return false; } //TODO is this possible?
+bool QuicConnectionManager::QuicSubflowPacketHandler::OnProtocolVersionMismatch(QuicVersion received_version) {return true; }
 void QuicConnectionManager::QuicSubflowPacketHandler::OnPublicResetPacket(const QuicPublicResetPacket& packet) {}
 void QuicConnectionManager::QuicSubflowPacketHandler::OnVersionNegotiationPacket(
     const QuicVersionNegotiationPacket& packet) {}

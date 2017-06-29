@@ -266,7 +266,11 @@ bool QuicDispatcher::OnUnauthenticatedPublicHeader(
   SessionMap::iterator it = session_map_.find(connection_id);
   if (it != session_map_.end()) {
     DCHECK(!buffered_packets_.HasBufferedPackets(connection_id));
-    it->second->ProcessUdpPacket(current_server_address_,
+    QuicSession *session = it->second.get();
+    session->connection_manager()->AddPacketWriter(
+        QuicSubflowDescriptor(current_server_address_,current_client_address_),
+        current_writer_);
+    session->ProcessUdpPacket(current_server_address_,
                                  current_client_address_, *current_packet_);
     return false;
   }
@@ -664,7 +668,7 @@ void QuicDispatcher::ProcessBufferedChlos(size_t max_connections_to_create) {
       return;
     }
     QuicSession* session =
-        CreateQuicSession(connection_id, packets.front().client_address);
+        CreateQuicSession(connection_id, packets.front().client_address, packets.front().server_address);
     QUIC_DLOG(INFO) << "Created new session for " << connection_id;
     session_map_.insert(std::make_pair(connection_id, QuicWrapUnique(session)));
     DeliverPacketsToSession(packets, session);
@@ -766,7 +770,7 @@ void QuicDispatcher::ProcessChlo() {
   }
   // Creates a new session and process all buffered packets for this connection.
   QuicSession* session =
-      CreateQuicSession(current_connection_id_, current_client_address_);
+      CreateQuicSession(current_connection_id_, current_client_address_, current_server_address_);
   QUIC_DLOG(INFO) << "Created new session for " << current_connection_id_;
   session_map_.insert(
       std::make_pair(current_connection_id_, QuicWrapUnique(session)));

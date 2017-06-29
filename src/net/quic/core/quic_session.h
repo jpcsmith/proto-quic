@@ -109,6 +109,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
   void OnPathDegrading() override;
   void OnAckFrame(const QuicAckFrame& frame) override;
   void OnHandshakeComplete() override;
+  void OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override;
 
   // Called on every incoming packet. Passes |packet| through to |connection_|.
   virtual void ProcessUdpPacket(const QuicSocketAddress& self_address,
@@ -179,9 +180,9 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
   // not yet been created.
   bool IsClosedStream(QuicStreamId id);
 
-  QuicConnection* connection() { return connection_manager_->InitialConnection(); }
-  const QuicConnection* connection() const { return connection_manager_->InitialConnection(); }
-  QuicConnectionManager* connectionManager() { return connection_manager_; }
+  QuicConnection* connection() { return connection_manager_->connection(); }
+  const QuicConnection* connection() const { return connection_manager_->connection(); }
+  QuicConnectionManager* connection_manager() { return connection_manager_; }
   size_t num_active_requests() const { return dynamic_stream_map_.size(); }
   const QuicSocketAddress& peer_address() const {
     return connection()->peer_address();

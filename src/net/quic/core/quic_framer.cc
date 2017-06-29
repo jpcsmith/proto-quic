@@ -144,7 +144,8 @@ QuicFramer::QuicFramer(const QuicVersionVector& supported_versions,
         creation_time,
         perspective,
         new QuicFramerCryptoContext(perspective),
-        true) {
+        true,
+        supported_versions[0]) {
 
 }
 
@@ -152,13 +153,15 @@ QuicFramer::QuicFramer(const QuicVersionVector& supported_versions,
                        QuicTime creation_time,
                        Perspective perspective,
                        QuicFramerCryptoContext *cc,
-                       bool owns_cc)
+                       bool owns_cc,
+                       QuicVersion version)
     : visitor_(nullptr),
       error_(QUIC_NO_ERROR),
       last_packet_number_(0),
       largest_packet_number_(0),
       last_serialized_connection_id_(0),
       last_version_tag_(0),
+      quic_version_(version),
       supported_versions_(supported_versions),
       cc_(cc),
       owns_cc_(owns_cc),
@@ -166,8 +169,6 @@ QuicFramer::QuicFramer(const QuicVersionVector& supported_versions,
       validate_flags_(true),
       creation_time_(creation_time),
       last_timestamp_(QuicTime::Delta::Zero()) {
-  DCHECK(!supported_versions.empty());
-  quic_version_ = supported_versions_[0];
 }
 
 QuicFramer::~QuicFramer() {

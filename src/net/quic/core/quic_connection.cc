@@ -172,7 +172,8 @@ class MtuDiscoveryAlarmDelegate : public QuicAlarm::Delegate {
   (perspective_ == Perspective::IS_SERVER ? "Server: " : "Client: ")
 
 QuicConnection::QuicConnection(QuicConnectionId connection_id,
-                               QuicSocketAddress address,
+                               QuicSocketAddress self_address,
+                               QuicSocketAddress peer_address,
                                QuicConnectionHelperInterface* helper,
                                QuicAlarmFactory* alarm_factory,
                                QuicPacketWriter* writer,
@@ -193,7 +194,8 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       clock_(helper->GetClock()),
       random_generator_(helper->GetRandomGenerator()),
       connection_id_(connection_id),
-      peer_address_(address),
+      self_address_(self_address),
+      peer_address_(peer_address),
       active_peer_migration_type_(NO_CHANGE),
       highest_packet_sent_before_peer_migration_(0),
       last_packet_decrypted_(false),
@@ -271,7 +273,7 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       write_error_occured_(false),
       no_stop_waiting_frames_(false),
       consecutive_num_packets_with_no_retransmittable_frames_(0),
-      should_send_new_subflow_frame_(false) {
+      subflow_state_(SUBFLOW_OPEN_INITIATED) {
   QUIC_DLOG(INFO) << ENDPOINT
                   << "Created connection with connection_id: " << connection_id;
   framer_->set_visitor(this);
@@ -306,7 +308,29 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
                                Perspective perspective,
                                const QuicVersionVector& supported_versions)
     : QuicConnection(connection_id,
+        QuicSocketAddress(),
         address,
+        helper,
+        alarm_factory,
+        writer,
+        owns_writer,
+        perspective,
+        supported_versions)
+{
+}
+
+QuicConnection::QuicConnection(QuicConnectionId connection_id,
+                               QuicSocketAddress self_address,
+                               QuicSocketAddress peer_address,
+                               QuicConnectionHelperInterface* helper,
+                               QuicAlarmFactory* alarm_factory,
+                               QuicPacketWriter* writer,
+                               bool owns_writer,
+                               Perspective perspective,
+                               const QuicVersionVector& supported_versions)
+    : QuicConnection(connection_id,
+        self_address,
+        peer_address,
         helper,
         alarm_factory,
         writer,
@@ -330,19 +354,22 @@ QuicConnection::~QuicConnection() {
 }
 
 QuicConnection *QuicConnection::CloneToSubflow(
-    QuicSocketAddress address,
+    QuicSubflowDescriptor descriptor,
     QuicPacketWriter *writer,
-    bool owns_writer) {
+    bool owns_writer,
+    QuicSubflowId subflowId) {
   QuicFramer *framer = new QuicFramer(
       supported_versions(),
       helper_->GetClock()->ApproximateNow(),
       perspective_,
       framer_->CryptoContext(),
-      false);
+      false,
+      framer_->version());
 
   QuicConnection *connection = new QuicConnection(
       connection_id_,
-      address,
+      descriptor.Self(),
+      descriptor.Peer(),
       helper_,
       alarm_factory_,
       writer,
@@ -352,7 +379,28 @@ QuicConnection *QuicConnection::CloneToSubflow(
       framer,
       /* owns_framer */ true,
       /* do_not_perform_handshake */ true);
+  connection->SetDefaultEncryptionLevel(encryption_level());
+
   return connection;
+}
+
+void QuicConnection::PrependNewSubflowFrame(QuicSubflowId subflowId) {
+  QuicFrames frames;
+  QuicFrame frame(new QuicNewSubflowFrame(subflowId));
+  frames.push_back(frame);
+  packet_generator_.packet_creator().SetPrependedFrames(frames);
+}
+
+void QuicConnection::PrependSubflowCloseFrame(QuicSubflowId subflowId) {
+  QuicFrames frames;
+  QuicFrame frame(new QuicSubflowCloseFrame(subflowId));
+  frames.push_back(frame);
+  packet_generator_.packet_creator().SetPrependedFrames(frames);
+}
+
+void QuicConnection::RemovePrependedFrames() {
+  QuicFrames frames;
+  packet_generator_.packet_creator().SetPrependedFrames(frames);
 }
 
 void QuicConnection::ClearQueuedPackets() {
@@ -981,32 +1029,16 @@ bool QuicConnection::OnBlockedFrame(const QuicBlockedFrame& frame) {
 
 bool QuicConnection::OnNewSubflowFrame(const QuicNewSubflowFrame& frame) {
   DCHECK(connected_);
-  //if (debug_visitor_ != nullptr) {
-  //  debug_visitor_->OnBlockedFrame(frame);
-  //}
   QUIC_DLOG(INFO) << ENDPOINT
                   << "NEW_SUBFLOW_FRAME received for subflow: " << frame.subflow_id;
-  //visitor_->OnBlockedFrame(frame);
-  //visitor_->PostProcessAfterData();
-  //stats_.blocked_frames_received++;
-  //should_last_packet_instigate_acks_ = true;
-
-  // use any subflow id received as the subflow id of this connection
-  received_packet_manager_.setSubflowId(frame.subflow_id);
   return connected_;
 }
 
 bool QuicConnection::OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) {
   DCHECK(connected_);
-  //if (debug_visitor_ != nullptr) {
-  //  debug_visitor_->OnBlockedFrame(frame);
-  //}
   QUIC_DLOG(INFO) << ENDPOINT
                   << "SUBFLOW_CLOSE_FRAME received for subflow: " << frame.subflow_id;
-  //visitor_->OnBlockedFrame(frame);
-  //visitor_->PostProcessAfterData();
-  //stats_.blocked_frames_received++;
-  //should_last_packet_instigate_acks_ = true;
+  visitor_->OnSubflowCloseFrame(frame);
   return connected_;
 }
 
@@ -1822,7 +1854,6 @@ void QuicConnection::OnHandshakeComplete() {
       ack_frame_updated()) {
     ack_alarm_->Update(clock_->ApproximateNow(), QuicTime::Delta::Zero());
   }
-  visitor_->OnHandshakeComplete();
 }
 
 void QuicConnection::SendOrQueuePacket(SerializedPacket* packet) {
@@ -2052,7 +2083,8 @@ void QuicConnection::SendConnectionClosePacket(QuicErrorCode error,
 void QuicConnection::TearDownLocalConnectionState(
     QuicErrorCode error,
     const string& error_details,
-    ConnectionCloseSource source) {
+    ConnectionCloseSource source,
+    bool notify_visitor) {
   if (!connected_) {
     QUIC_DLOG(INFO) << "Connection is already closed.";
     return;
@@ -2062,7 +2094,7 @@ void QuicConnection::TearDownLocalConnectionState(
   // TODO(rtenneti): crbug.com/546668. A temporary fix. Added a check for null
   // |visitor_| to fix crash bug. Delete |visitor_| check and histogram after
   // fix is merged.
-  if (visitor_ != nullptr) {
+  if (notify_visitor && visitor_ != nullptr) {
     visitor_->OnConnectionClosed(error, error_details, source);
   } else {
     UMA_HISTOGRAM_BOOLEAN("Net.QuicCloseConnection.NullVisitor", true);
@@ -2402,15 +2434,6 @@ QuicByteCount QuicConnection::GetLimitedMaxPacketSize(
     max_packet_size = kMaxPacketSize;
   }
   return max_packet_size;
-}
-
-void QuicConnection::SendNewSubflowPacket(QuicSubflowId id) {
-  QUIC_DLOG(INFO) << ENDPOINT << "Sending new subflow packet.";
-  ClearQueuedPackets();
-  ScopedPacketBundler ack_bundler(this, NO_ACK);
-  QuicNewSubflowFrame* frame = new QuicNewSubflowFrame(id);
-  packet_generator_.AddControlFrame(QuicFrame(frame));
-  packet_generator_.FlushAllQueuedFrames();
 }
 
 void QuicConnection::SendMtuDiscoveryPacket(QuicByteCount target_mtu) {

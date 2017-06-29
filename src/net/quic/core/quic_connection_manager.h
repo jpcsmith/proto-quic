@@ -43,12 +43,20 @@ public:
     return connections_.at(kInitialSubflowId);
   }
 
+  void set_current_subflow_id(QuicSubflowId id) { current_subflow_id_ = id; }
+
+  QuicConnection *connection() const {
+    return connections_.find(current_subflow_id_)->second;
+    //return connections_[current_subflow_id_];
+  }
+
   QuicConnection *AnyConnection() const {
     QUIC_BUG_IF(connections_.size()==0) << "There are no connections";
     return connections_.begin()->second;
   }
 
   void TryAddingSubflow(QuicSubflowDescriptor descriptor);
+  void AddPacketWriter(QuicSubflowDescriptor descriptor, QuicPacketWriter *writer);
   void CloseSubflow(QuicSubflowId id);
   void ProcessUdpPacket(const QuicSocketAddress& self_address,
                                      const QuicSocketAddress& peer_address,
@@ -78,6 +86,7 @@ public:
   bool HasOpenDynamicStreams() const override;
   void OnAckFrame(const QuicAckFrame& frame) override;
   void OnHandshakeComplete() override;
+  void OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override;
 
 
 
@@ -134,8 +143,11 @@ private:
         QuicTime creation_time,
         Perspective perspective,
         QuicFramerCryptoContext *cc,
-        bool owns_cc)
-    : framer_(supported_versions, creation_time, perspective, cc, owns_cc) {}
+        bool owns_cc,
+        QuicVersion version)
+    : framer_(supported_versions, creation_time, perspective, cc, owns_cc, version) {
+      framer_.set_visitor(this);
+    }
     ~QuicSubflowPacketHandler() override {}
 
     // Processes a packet from a new subflow and checks whether there is exactly
@@ -190,10 +202,14 @@ private:
     SUBFLOW_INCOMING
   };
   void OpenConnection(QuicSubflowDescriptor descriptor, QuicSubflowId subflowId, SubflowDirection direction);
-  void CloseConnection(QuicSubflowId subflowId);
+  void AddConnection(QuicSubflowDescriptor descriptor, QuicSubflowId subflowId, QuicConnection *connection);
+  void CloseConnection(QuicSubflowId subflowId, SubflowDirection direction);
+  void RemoveConnection(QuicSubflowId subflowId);
 
   // Create packet writer for new connections
-  QuicPacketWriter *CreatePacketWriter();
+  QuicPacketWriter *GetPacketWriter(QuicSubflowDescriptor descriptor);
+
+  void InitializeSubflowPacketHandler();
 
   QuicSubflowId GetNextOutgoingSubflowId();
   bool IsValidIncomingSubflowId(QuicSubflowId id);
@@ -218,6 +234,9 @@ private:
   // a connection. (Packets on new subflows)
   QuicSubflowPacketHandler *packet_handler_;
 
+  std::map<QuicSubflowDescriptor, QuicPacketWriter*> packet_writer_map_;
+
+  QuicSubflowId current_subflow_id_;
 
   /*std::map<QuicSubflowDescriptor, QuicSubflowCreationAttempt> subflow_attempt_map_;
 
