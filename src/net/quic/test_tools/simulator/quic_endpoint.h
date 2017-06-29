@@ -90,8 +90,6 @@ class QuicEndpoint : public Endpoint,
   void OnPathDegrading() override {}
   void PostProcessAfterData() override {}
   void OnAckNeedsRetransmittableFrame() override {}
-  void OnAckFrame(const QuicAckFrame& frame) override {}
-  void OnHandshakeComplete() override {}
   // End QuicConnectionVisitorInterface implementation.
 
  private:

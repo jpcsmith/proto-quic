@@ -236,8 +236,6 @@ class MockFramerVisitor : public QuicFramerVisitorInterface {
   MOCK_METHOD1(OnWindowUpdateFrame, bool(const QuicWindowUpdateFrame& frame));
   MOCK_METHOD1(OnBlockedFrame, bool(const QuicBlockedFrame& frame));
   MOCK_METHOD0(OnPacketComplete, void());
-  MOCK_METHOD1(OnNewSubflowFrame, bool(const QuicNewSubflowFrame& frame));
-  MOCK_METHOD1(OnSubflowCloseFrame, bool(const QuicSubflowCloseFrame& frame));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockFramerVisitor);
@@ -269,8 +267,6 @@ class NoOpFramerVisitor : public QuicFramerVisitorInterface {
   bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
   bool OnBlockedFrame(const QuicBlockedFrame& frame) override;
   void OnPacketComplete() override {}
-  bool OnNewSubflowFrame(const QuicNewSubflowFrame& frame) override;
-  bool OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NoOpFramerVisitor);
@@ -303,8 +299,6 @@ class MockQuicConnectionVisitor : public QuicConnectionVisitorInterface {
   MOCK_METHOD0(OnConfigNegotiated, void());
   MOCK_METHOD0(PostProcessAfterData, void());
   MOCK_METHOD0(OnAckNeedsRetransmittableFrame, void());
-  MOCK_METHOD1(OnAckFrame, void(const QuicAckFrame& frame));
-  MOCK_METHOD0(OnHandshakeComplete, void());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockQuicConnectionVisitor);

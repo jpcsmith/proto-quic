@@ -106,15 +106,6 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
     return true;
   }
 
-  bool OnNewSubflowFrame(const QuicNewSubflowFrame& frame) override {
-    new_subflow_frames_.push_back(frame);
-    return true;
-  }
-
-  bool OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override {
-    subflow_close_frames_.push_back(frame);
-    return true;
-  }
   void OnPacketComplete() override {}
 
   const QuicPacketHeader& header() const { return header_; }
@@ -161,8 +152,6 @@ class SimpleFramerVisitor : public QuicFramerVisitorInterface {
   std::vector<QuicConnectionCloseFrame> connection_close_frames_;
   std::vector<QuicWindowUpdateFrame> window_update_frames_;
   std::vector<QuicBlockedFrame> blocked_frames_;
-  std::vector<QuicNewSubflowFrame> new_subflow_frames_;
-  std::vector<QuicSubflowCloseFrame> subflow_close_frames_;
   std::vector<std::unique_ptr<string>> stream_data_;
 
   DISALLOW_COPY_AND_ASSIGN(SimpleFramerVisitor);

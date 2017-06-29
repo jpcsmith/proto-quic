@@ -82,7 +82,7 @@ QuicTime::Delta QuicConnectionPeer::GetNetworkTimeout(
 void QuicConnectionPeer::SetPerspective(QuicConnection* connection,
                                         Perspective perspective) {
   connection->perspective_ = perspective;
-  QuicFramerPeer::SetPerspective(connection->framer_, perspective);
+  QuicFramerPeer::SetPerspective(&connection->framer_, perspective);
 }
 
 // static
@@ -106,7 +106,7 @@ bool QuicConnectionPeer::IsSilentCloseEnabled(QuicConnection* connection) {
 // static
 void QuicConnectionPeer::SwapCrypters(QuicConnection* connection,
                                       QuicFramer* framer) {
-  QuicFramerPeer::SwapCrypters(framer, connection->framer_);
+  QuicFramerPeer::SwapCrypters(framer, &connection->framer_);
 }
 
 // static
@@ -130,7 +130,7 @@ QuicAlarmFactory* QuicConnectionPeer::GetAlarmFactory(
 
 // static
 QuicFramer* QuicConnectionPeer::GetFramer(QuicConnection* connection) {
-  return connection->framer_;
+  return &connection->framer_;
 }
 
 // static
