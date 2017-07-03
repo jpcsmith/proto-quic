@@ -137,9 +137,9 @@ void QuicSession::OnConnectionClosed(QuicErrorCode error,
   }
 }
 
-void QuicSession::OnWriteBlocked() {
+void QuicSession::OnWriteBlocked(QuicBlockedWriterInterface* blocked_writer) {
   if (visitor_) {
-    visitor_->OnWriteBlocked(connection());
+    visitor_->OnWriteBlocked(blocked_writer);
   }
 }
 
@@ -213,7 +213,7 @@ bool QuicSession::CheckStreamNotBusyLooping(QuicStream* stream,
   return true;
 }
 
-void QuicSession::OnCanWrite() {
+void QuicSession::OnCanWrite(QuicConnection *connection) {
   // We limit the number of writes to the number of pending streams. If more
   // streams become pending, WillingAndAbleToWrite will be true, which will
   // cause the connection to request resumption before yielding to other

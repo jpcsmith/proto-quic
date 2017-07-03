@@ -97,77 +97,76 @@ class QUIC_EXPORT_PRIVATE QuicConnectionVisitorInterface {
   virtual ~QuicConnectionVisitorInterface() {}
 
   // A simple visitor interface for dealing with a data frame.
-  virtual void OnStreamFrame(const QuicStreamFrame& frame) = 0;
+  virtual void OnStreamFrame(const QuicSubflowId& subflowId, const QuicStreamFrame& frame) = 0;
 
   // The session should process the WINDOW_UPDATE frame, adjusting both stream
   // and connection level flow control windows.
-  virtual void OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) = 0;
+  virtual void OnWindowUpdateFrame(const QuicSubflowId& subflowId, const QuicWindowUpdateFrame& frame) = 0;
 
   // A BLOCKED frame indicates the peer is flow control blocked
   // on a specified stream.
-  virtual void OnBlockedFrame(const QuicBlockedFrame& frame) = 0;
+  virtual void OnBlockedFrame(const QuicSubflowId& subflowId, const QuicBlockedFrame& frame) = 0;
 
   // Called when the stream is reset by the peer.
-  virtual void OnRstStream(const QuicRstStreamFrame& frame) = 0;
+  virtual void OnRstStream(const QuicSubflowId& subflowId, const QuicRstStreamFrame& frame) = 0;
 
   // Called when the connection is going away according to the peer.
-  virtual void OnGoAway(const QuicGoAwayFrame& frame) = 0;
+  virtual void OnGoAway(const QuicSubflowId& subflowId, const QuicGoAwayFrame& frame) = 0;
 
   // Called when the connection is closed either locally by the framer, or
   // remotely by the peer.
-  virtual void OnConnectionClosed(QuicErrorCode error,
+  virtual void OnConnectionClosed(const QuicSubflowId& subflowId,
+                                  QuicErrorCode error,
                                   const std::string& error_details,
                                   ConnectionCloseSource source) = 0;
 
   // Called when the connection failed to write because the socket was blocked.
-  virtual void OnWriteBlocked() = 0;
+  virtual void OnWriteBlocked(const QuicSubflowId& subflowId) = 0;
 
   // Called once a specific QUIC version is agreed by both endpoints.
-  virtual void OnSuccessfulVersionNegotiation(const QuicVersion& version) = 0;
+  virtual void OnSuccessfulVersionNegotiation(const QuicSubflowId& subflowId, const QuicVersion& version) = 0;
 
   // Called when a blocked socket becomes writable.
-  virtual void OnCanWrite() = 0;
+  virtual void OnCanWrite(const QuicSubflowId& subflowId) = 0;
 
   // Called when the connection experiences a change in congestion window.
-  virtual void OnCongestionWindowChange(QuicTime now) = 0;
+  virtual void OnCongestionWindowChange(const QuicSubflowId& subflowId, QuicTime now) = 0;
 
   // Called when the connection receives a packet from a migrated client.
-  virtual void OnConnectionMigration(PeerAddressChangeType type) = 0;
+  virtual void OnConnectionMigration(const QuicSubflowId& subflowId, PeerAddressChangeType type) = 0;
 
   // Called when the peer seems unreachable over the current path.
-  virtual void OnPathDegrading() = 0;
+  virtual void OnPathDegrading(const QuicSubflowId& subflowId) = 0;
 
   // Called after OnStreamFrame, OnRstStream, OnGoAway, OnWindowUpdateFrame,
   // OnBlockedFrame, and OnCanWrite to allow post-processing once the work has
   // been done.
-  virtual void PostProcessAfterData() = 0;
+  virtual void PostProcessAfterData(const QuicSubflowId& subflowId) = 0;
 
   // Called when the connection sends ack after
   // kMaxConsecutiveNonRetransmittablePackets consecutive not retransmittable
   // packets sent. To instigate an ack from peer, a retransmittable frame needs
   // to be added.
-  virtual void OnAckNeedsRetransmittableFrame() = 0;
+  virtual void OnAckNeedsRetransmittableFrame(const QuicSubflowId& subflowId) = 0;
 
   // Called to ask if the visitor wants to schedule write resumption as it both
   // has pending data to write, and is able to write (e.g. based on flow control
   // limits).
   // Writes may be pending because they were write-blocked, congestion-throttled
   // or yielded to other connections.
-  virtual bool WillingAndAbleToWrite() const = 0;
+  virtual bool WillingAndAbleToWrite(const QuicSubflowId& subflowId) const = 0;
 
   // Called to ask if any handshake messages are pending in this visitor.
-  virtual bool HasPendingHandshake() const = 0;
+  virtual bool HasPendingHandshake(const QuicSubflowId& subflowId) const = 0;
 
   // Called to ask if any streams are open in this visitor, excluding the
   // reserved crypto and headers stream.
-  virtual bool HasOpenDynamicStreams() const = 0;
+  virtual bool HasOpenDynamicStreams(const QuicSubflowId& subflowId) const = 0;
 
   // Called whenever an ACK frame is received
-  virtual void OnAckFrame(const QuicAckFrame& frame) = 0;
+  virtual void OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame) = 0;
 
-  virtual void OnHandshakeComplete() = 0;
-
-  virtual void OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) = 0;
+  virtual void OnSubflowCloseFrame(const QuicSubflowId& subflowId, const QuicSubflowCloseFrame& frame) = 0;
 };
 
 // Interface which gets callbacks from the QuicConnection at interesting

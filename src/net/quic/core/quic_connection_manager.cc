@@ -202,46 +202,50 @@ QuicSubflowId QuicConnectionManager::GetNextOutgoingSubflowId() {
   return id;
 }
 
-void QuicConnectionManager::OnStreamFrame(const QuicStreamFrame& frame) {
-  if(visitor_ != nullptr) visitor_->OnStreamFrame(frame);
+void QuicConnectionManager::OnStreamFrame(const QuicSubflowId& subflowId, const QuicStreamFrame& frame) {
+  if(visitor_) visitor_->OnStreamFrame(frame);
 }
-void QuicConnectionManager::OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {
-  if(visitor_ != nullptr) visitor_->OnWindowUpdateFrame(frame);
+void QuicConnectionManager::OnWindowUpdateFrame(const QuicSubflowId& subflowId, const QuicWindowUpdateFrame& frame) {
+  if(visitor_) visitor_->OnWindowUpdateFrame(frame);
 }
-void QuicConnectionManager::OnBlockedFrame(const QuicBlockedFrame& frame) {
-  if(visitor_ != nullptr) visitor_->OnBlockedFrame(frame);
+void QuicConnectionManager::OnBlockedFrame(const QuicSubflowId& subflowId, const QuicBlockedFrame& frame) {
+  if(visitor_) visitor_->OnBlockedFrame(frame);
 }
-void QuicConnectionManager::OnRstStream(const QuicRstStreamFrame& frame) {
-  if(visitor_ != nullptr) visitor_->OnRstStream(frame);
+void QuicConnectionManager::OnRstStream(const QuicSubflowId& subflowId, const QuicRstStreamFrame& frame) {
+  if(visitor_) visitor_->OnRstStream(frame);
 }
-void QuicConnectionManager::OnGoAway(const QuicGoAwayFrame& frame) {
-  if(visitor_ != nullptr) visitor_->OnGoAway(frame);
+void QuicConnectionManager::OnGoAway(const QuicSubflowId& subflowId, const QuicGoAwayFrame& frame) {
+  if(visitor_) visitor_->OnGoAway(frame);
 }
-void QuicConnectionManager::OnConnectionClosed(QuicErrorCode error,
+void QuicConnectionManager::OnConnectionClosed(const QuicSubflowId& subflowId, QuicErrorCode error,
     const std::string& error_details, ConnectionCloseSource source) {
   for(auto it = connections_.begin(); it != connections_.end(); ++it) {
-    // No need to notify visitor
-    it->second->TearDownLocalConnectionState(error,error_details,source,false);
+    if(it->first != subflowId) {
+      // No need to notify visitor
+      it->second->TearDownLocalConnectionState(error,error_details,source,false);
+    }
   }
-  if(visitor_ != nullptr) visitor_->OnConnectionClosed(error,error_details,source);
+  if(visitor_) visitor_->OnConnectionClosed(error,error_details,source);
 }
-void QuicConnectionManager::OnWriteBlocked() {
-  if(visitor_ != nullptr) visitor_->OnWriteBlocked();
+void QuicConnectionManager::OnWriteBlocked(const QuicSubflowId& subflowId) {
+  //TODO maybe use a different subflow if this one is write blocked
+  if(visitor_) visitor_->OnWriteBlocked(connections_[subflowId]);
 }
-void QuicConnectionManager::OnSuccessfulVersionNegotiation(const QuicVersion& version) {
-  if(visitor_ != nullptr) visitor_->OnSuccessfulVersionNegotiation(version);
+void QuicConnectionManager::OnSuccessfulVersionNegotiation(const QuicSubflowId& subflowId, const QuicVersion& version) {
+  if(visitor_) visitor_->OnSuccessfulVersionNegotiation(version);
 }
-void QuicConnectionManager::OnCanWrite() {
-  if(visitor_ != nullptr) visitor_->OnCanWrite();
+void QuicConnectionManager::OnCanWrite(const QuicSubflowId& subflowId) {
+  if(visitor_) visitor_->OnCanWrite(connections_[subflowId]);
 }
-void QuicConnectionManager::OnCongestionWindowChange(QuicTime now) {
-  if(visitor_ != nullptr) visitor_->OnCongestionWindowChange(now);
+void QuicConnectionManager::OnCongestionWindowChange(const QuicSubflowId& subflowId, QuicTime now) {
+  if(visitor_) visitor_->OnCongestionWindowChange(now);
 }
-void QuicConnectionManager::OnConnectionMigration(PeerAddressChangeType type) {
-  if(visitor_ != nullptr) visitor_->OnConnectionMigration(type);
+void QuicConnectionManager::OnConnectionMigration(const QuicSubflowId& subflowId, PeerAddressChangeType type) {
+  if(visitor_) visitor_->OnConnectionMigration(type);
 }
-void QuicConnectionManager::OnPathDegrading() {
-  if(visitor_ != nullptr) visitor_->OnPathDegrading();
+void QuicConnectionManager::OnPathDegrading(const QuicSubflowId& subflowId) {
+  //TODO only send if all paths are degrading?
+  if(visitor_) visitor_->OnPathDegrading();
 }
 void QuicConnectionManager::PostProcessAfterData() {
   if(visitor_ != nullptr) visitor_->PostProcessAfterData();

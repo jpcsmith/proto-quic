@@ -93,9 +93,9 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
   void OnConnectionClosed(QuicErrorCode error,
                           const std::string& error_details,
                           ConnectionCloseSource source) override;
-  void OnWriteBlocked() override;
+  void OnWriteBlocked(QuicBlockedWriterInterface* blocked_writer) override;
   void OnSuccessfulVersionNegotiation(const QuicVersion& version) override;
-  void OnCanWrite() override;
+  void OnCanWrite(QuicConnection* connection) override;
   void OnCongestionWindowChange(QuicTime /*now*/) override {}
   void OnConnectionMigration(PeerAddressChangeType type) override {}
   // Deletes streams that are safe to be deleted now that it's safe to do so (no
