@@ -130,6 +130,9 @@ public:
                                      const QuicSocketAddress& peer_address,
                                      const QuicReceivedPacket& packet);
 
+  // Called when the CryptoHandshakeEvent HANDSHAKE_CONFIRMED was received.
+  void OnHandshakeComplete();
+
   // QuicSubflowCreationAttemptDelegate
   //void OnSubflowCreationFailed(QuicSubflowId id) override;
 

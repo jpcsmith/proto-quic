@@ -35,6 +35,7 @@ QuicConnectionManager::~QuicConnectionManager() {
       delete it.second;
     }
   }
+  connections_.clear();
   if(packet_handler_ != nullptr) {
     delete packet_handler_;
   }
@@ -160,7 +161,8 @@ void QuicConnectionManager::CloseConnection(QuicSubflowId subflowId, SubflowDire
     connection->SetSubflowState(QuicConnection::SUBFLOW_CLOSE_INITIATED);
   }
 
-  RemoveConnection(subflowId);
+  //TODO remove connections or just set the state to SUBFLOW_CLOSED?
+  //RemoveConnection(subflowId);
 }
 
 void QuicConnectionManager::RemoveConnection(QuicSubflowId subflowId) {
@@ -200,6 +202,29 @@ QuicSubflowId QuicConnectionManager::GetNextOutgoingSubflowId() {
   QuicSubflowId id = next_outgoing_subflow_id_;
   next_outgoing_subflow_id_ += 2;
   return id;
+}
+
+void QuicConnectionManager::OnHandshakeComplete() {
+  // As soon as we have our keys set up, we can set up our QuicFramer
+  // to decrypt/decode incoming and encrypt/encode outgoing subflow requests
+  InitializeSubflowPacketHandler();
+
+  InitialConnection()->SetSubflowState(QuicConnection::SUBFLOW_OPEN);
+
+  // Add outgoing subflows
+  for(const QuicSubflowDescriptor& descriptor: buffered_outgoing_subflow_attempts_) {
+    TryAddingSubflow(descriptor);
+  }
+  buffered_outgoing_subflow_attempts_.clear();
+
+  // Add incoming subflows
+  for(std::pair<QuicSubflowDescriptor, std::unique_ptr<QuicReceivedPacket> >& incomingRequest: buffered_incoming_subflow_attempts_) {
+    ProcessUdpPacket(
+        incomingRequest.first.Self(),
+        incomingRequest.first.Peer(),
+        *incomingRequest.second);
+  }
+  buffered_incoming_subflow_attempts_.clear();
 }
 
 void QuicConnectionManager::OnStreamFrame(const QuicSubflowId& subflowId, const QuicStreamFrame& frame) {
@@ -247,25 +272,25 @@ void QuicConnectionManager::OnPathDegrading(const QuicSubflowId& subflowId) {
   //TODO only send if all paths are degrading?
   if(visitor_) visitor_->OnPathDegrading();
 }
-void QuicConnectionManager::PostProcessAfterData() {
-  if(visitor_ != nullptr) visitor_->PostProcessAfterData();
+void QuicConnectionManager::PostProcessAfterData(const QuicSubflowId& subflowId) {
+  if(visitor_) visitor_->PostProcessAfterData();
 }
-void QuicConnectionManager::OnAckNeedsRetransmittableFrame() {
-  if(visitor_ != nullptr) visitor_->OnAckNeedsRetransmittableFrame();
+void QuicConnectionManager::OnAckNeedsRetransmittableFrame(const QuicSubflowId& subflowId) {
+  if(visitor_) visitor_->OnAckNeedsRetransmittableFrame();
 }
-bool QuicConnectionManager::WillingAndAbleToWrite() const {
-  if(visitor_ != nullptr) return visitor_->WillingAndAbleToWrite();
+bool QuicConnectionManager::WillingAndAbleToWrite(const QuicSubflowId& subflowId) const {
+  if(visitor_) return visitor_->WillingAndAbleToWrite();
   return false;
 }
-bool QuicConnectionManager::HasPendingHandshake() const {
-  if(visitor_ != nullptr) return visitor_->HasPendingHandshake();
+bool QuicConnectionManager::HasPendingHandshake(const QuicSubflowId& subflowId) const {
+  if(visitor_) return visitor_->HasPendingHandshake();
   return false;
 }
-bool QuicConnectionManager::HasOpenDynamicStreams() const {
-  if(visitor_ != nullptr) return visitor_->HasOpenDynamicStreams();
+bool QuicConnectionManager::HasOpenDynamicStreams(const QuicSubflowId& subflowId) const {
+  if(visitor_) return visitor_->HasOpenDynamicStreams();
   return false;
 }
-void QuicConnectionManager::OnAckFrame(const QuicAckFrame& frame) {
+void QuicConnectionManager::OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame) {
   auto it = connections_.find(frame.subflow_id);
   if(it != connections_.end()) {
     QuicConnection *connection = it->second;
@@ -287,36 +312,14 @@ void QuicConnectionManager::OnAckFrame(const QuicAckFrame& frame) {
     //TODO error handling
   }
 }
-void QuicConnectionManager::OnHandshakeComplete() {
-  // As soon as we have our keys set up, we can set up our QuicFramer
-  // to decrypt/decode incoming and encrypt/encode outgoing subflow requests
-  InitializeSubflowPacketHandler();
-
-  InitialConnection()->SetSubflowState(QuicConnection::SUBFLOW_OPEN);
-
-  // Add outgoing subflows
-  for(const QuicSubflowDescriptor& descriptor: buffered_outgoing_subflow_attempts_) {
-    TryAddingSubflow(descriptor);
-  }
-  buffered_outgoing_subflow_attempts_.clear();
-
-  // Add incoming subflows
-  for(std::pair<QuicSubflowDescriptor, std::unique_ptr<QuicReceivedPacket> >& incomingRequest: buffered_incoming_subflow_attempts_) {
-    ProcessUdpPacket(
-        incomingRequest.first.Self(),
-        incomingRequest.first.Peer(),
-        *incomingRequest.second);
-  }
-  buffered_incoming_subflow_attempts_.clear();
-}
-void QuicConnectionManager::OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) {
+void QuicConnectionManager::OnSubflowCloseFrame(const QuicSubflowId& subflowId, const QuicSubflowCloseFrame& frame) {
   auto it = connections_.find(frame.subflow_id);
-    if(it != connections_.end()) {
-      QuicConnection *connection = it->second;
-      connection->SetSubflowState(QuicConnection::SUBFLOW_CLOSED);
-    } else {
-      //TODO error handling
-    }
+  if(it != connections_.end()) {
+    QuicConnection *connection = it->second;
+    connection->SetSubflowState(QuicConnection::SUBFLOW_CLOSED);
+  } else {
+    //TODO error handling
+  }
 }
 
 
