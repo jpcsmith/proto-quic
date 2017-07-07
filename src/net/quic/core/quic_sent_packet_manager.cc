@@ -364,19 +364,32 @@ void QuicSentPacketManager::MarkForRetransmission(
   const QuicTransmissionInfo& transmission_info =
       unacked_packets_.GetTransmissionInfo(packet_number);
   QUIC_BUG_IF(transmission_info.retransmittable_frames.empty());
-  // Both TLP and the new RTO leave the packets in flight and let the loss
-  // detection decide if packets are lost.
-  if (transmission_type != TLP_RETRANSMISSION &&
-      transmission_type != RTO_RETRANSMISSION) {
-    unacked_packets_.RemoveFromInFlight(packet_number);
-  }
-    // TODO(ianswett): Currently the RTO can fire while there are pending NACK
-    // retransmissions for the same data, which is not ideal.
-  if (QuicContainsKey(pending_retransmissions_, packet_number)) {
-    return;
+
+  // Always send handshake messages on the same connection
+  // If we didn't specify a retransmission visitor, retransmit all
+  // packets on this connection.
+  if(transmission_type == HANDSHAKE_RETRANSMISSION || retransmission_visitor_ == nullptr) {
+
+    // Both TLP and the new RTO leave the packets in flight and let the loss
+    // detection decide if packets are lost.
+    if (transmission_type != TLP_RETRANSMISSION &&
+        transmission_type != RTO_RETRANSMISSION) {
+      unacked_packets_.RemoveFromInFlight(packet_number);
     }
+      // TODO(ianswett): Currently the RTO can fire while there are pending NACK
+      // retransmissions for the same data, which is not ideal.
+    if (QuicContainsKey(pending_retransmissions_, packet_number)) {
+      return;
+      }
 
     pending_retransmissions_[packet_number] = transmission_type;
+  } else {
+    // Let the connection manager decide on which subflow to retransmit the packet.
+    unacked_packets_.RemoveFromInFlight(packet_number);
+    if(retransmission_visitor_) {
+      retransmission_visitor_->OnRetransmission(unacked_packets_.ExtractTransmissionInfo(packet_number));
+    }
+  }
 }
 
 void QuicSentPacketManager::RecordOneSpuriousRetransmission(

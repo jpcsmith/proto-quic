@@ -70,7 +70,7 @@ QuicMultipathClient::QuicMultipathClient(QuicSocketAddress server_address,
 
 QuicMultipathClient::~QuicMultipathClient() {
   if (connected()) {
-    session()->connection()->CloseConnection(
+    session()->CloseConnection(
         QUIC_PEER_GOING_AWAY, "Client being torn down",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
   }
@@ -209,7 +209,7 @@ void QuicMultipathClient::OnEvent(int fd, EpollEvent* event) {
   }
   if (connected() && (event->in_events & EPOLLOUT)) {
     fd_to_writer_map_[fd]->SetWritable();
-    session()->OnCanWrite();
+    session()->OnCanWrite(session()->connection_manager()->ConnectionOfSubflow(fd_to_subflow_map_[fd]));
     //session()->OnCanWrite(fd_to_subflow_map_[fd]);
 
     //writer()->SetWritable();

@@ -321,7 +321,8 @@ QuicConnectionLogger::~QuicConnectionLogger() {
   UMA_HISTOGRAM_COUNTS("Net.QuicSession.BlockedFrames.Sent",
                        num_blocked_frames_sent_);
 
-  const QuicConnectionStats& stats = session_->connection()->GetStats();
+  //TODO combine stats from all subflows
+  const QuicConnectionStats& stats = session_->InitialConnection()->GetStats();
   UMA_HISTOGRAM_TIMES("Net.QuicSession.MinRTT",
                       base::TimeDelta::FromMicroseconds(stats.min_rtt_us));
   UMA_HISTOGRAM_TIMES("Net.QuicSession.SmoothedRTT",

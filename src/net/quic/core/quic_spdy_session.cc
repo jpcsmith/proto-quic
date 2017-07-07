@@ -409,7 +409,7 @@ void QuicSpdySession::OnStreamHeaderList(QuicStreamId stream_id,
         const string& header_value = header.second;
         if (header_key == kFinalOffsetHeaderKey) {
           if (!QuicTextUtils::StringToSizeT(header_value, &final_byte_offset)) {
-            connection()->CloseConnection(
+            CloseConnection(
                 QUIC_INVALID_HEADERS_STREAM_DATA,
                 "Trailers are malformed (no final offset)",
                 ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
@@ -601,8 +601,8 @@ QuicSpdyStream* QuicSpdySession::GetSpdyDataStream(
   return static_cast<QuicSpdyStream*>(GetOrCreateDynamicStream(stream_id));
 }
 
-void QuicSpdySession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
-  QuicSession::OnCryptoHandshakeEvent(event);
+void QuicSpdySession::OnCryptoHandshakeEvent(QuicConnection* connection, CryptoHandshakeEvent event) {
+  QuicSession::OnCryptoHandshakeEvent(connection, event);
   if (FLAGS_quic_reloadable_flag_quic_send_max_header_list_size &&
       event == HANDSHAKE_CONFIRMED && config()->SupportMaxHeaderListSize()) {
     SendMaxHeaderListSize(kDefaultMaxUncompressedHeaderSize);
@@ -615,16 +615,16 @@ void QuicSpdySession::OnPromiseHeaderList(QuicStreamId stream_id,
                                           const QuicHeaderList& header_list) {
   string error = "OnPromiseHeaderList should be overriden in client code.";
   QUIC_BUG << error;
-  connection()->CloseConnection(QUIC_INTERNAL_ERROR, error,
+  CloseConnection(QUIC_INTERNAL_ERROR, error,
                                 ConnectionCloseBehavior::SILENT_CLOSE);
 }
 
-void QuicSpdySession::OnConfigNegotiated() {
-  QuicSession::OnConfigNegotiated();
+void QuicSpdySession::OnConfigNegotiated(QuicConnection *connection) {
+  QuicSession::OnConfigNegotiated(connection);
   if (config()->HasClientSentConnectionOption(kDHDT, perspective())) {
     DisableHpackDynamicTable();
   }
-  const QuicVersion version = connection()->version();
+  const QuicVersion version = AnyConnection()->version();
   if (FLAGS_quic_reloadable_flag_quic_enable_force_hol_blocking &&
       version == QUIC_VERSION_36 && config()->ForceHolBlocking(perspective())) {
     force_hol_blocking_ = true;
@@ -739,14 +739,14 @@ void QuicSpdySession::SetHpackEncoderDebugVisitor(
     std::unique_ptr<QuicHpackDebugVisitor> visitor) {
   spdy_framer_.SetEncoderHeaderTableDebugVisitor(
       std::unique_ptr<HeaderTableDebugVisitor>(new HeaderTableDebugVisitor(
-          connection()->helper()->GetClock(), std::move(visitor))));
+          AnyConnection()->helper()->GetClock(), std::move(visitor))));
 }
 
 void QuicSpdySession::SetHpackDecoderDebugVisitor(
     std::unique_ptr<QuicHpackDebugVisitor> visitor) {
   spdy_framer_.SetDecoderHeaderTableDebugVisitor(
       std::unique_ptr<HeaderTableDebugVisitor>(new HeaderTableDebugVisitor(
-          connection()->helper()->GetClock(), std::move(visitor))));
+          AnyConnection()->helper()->GetClock(), std::move(visitor))));
 }
 
 void QuicSpdySession::UpdateHeaderEncoderTableSize(uint32_t value) {
@@ -799,7 +799,7 @@ void QuicSpdySession::set_max_uncompressed_header_bytes(
 
 void QuicSpdySession::CloseConnectionWithDetails(QuicErrorCode error,
                                                  const string& details) {
-  connection()->CloseConnection(
+  CloseConnection(
       error, details, ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
 }
 

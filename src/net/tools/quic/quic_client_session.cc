@@ -99,7 +99,7 @@ int QuicClientSession::GetNumReceivedServerConfigUpdates() const {
 
 bool QuicClientSession::ShouldCreateIncomingDynamicStream(QuicStreamId id) {
   DCHECK(!FLAGS_quic_reloadable_flag_quic_refactor_stream_creation);
-  if (!connection()->connected()) {
+  if (!connected()) {
     QUIC_BUG << "ShouldCreateIncomingDynamicStream called when disconnected";
     return false;
   }
@@ -110,7 +110,7 @@ bool QuicClientSession::ShouldCreateIncomingDynamicStream(QuicStreamId id) {
   }
   if (id % 2 != 0) {
     QUIC_LOG(WARNING) << "Received invalid push stream id " << id;
-    connection()->CloseConnection(
+    CloseConnection(
         QUIC_INVALID_STREAM_ID, "Server created odd numbered stream",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return false;

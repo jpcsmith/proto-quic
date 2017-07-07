@@ -24,10 +24,14 @@ namespace net {
                                                                      " ")
 
 QuicCryptoStream::QuicCryptoStream(QuicSession* session)
+    : QuicCryptoStream(session,session->InitialConnection()) {}
+
+QuicCryptoStream::QuicCryptoStream(QuicSession* session, QuicConnection* connection)
     : QuicStream(kCryptoStreamId, session),
       encryption_established_(false),
       handshake_confirmed_(false),
-      crypto_negotiated_params_(new QuicCryptoNegotiatedParameters) {
+      crypto_negotiated_params_(new QuicCryptoNegotiatedParameters),
+      connection_(connection) {
   crypto_framer_.set_visitor(this);
   // The crypto stream is exempt from connection level flow control.
   DisableConnectionFlowControlForThisStream();
@@ -86,7 +90,7 @@ void QuicCryptoStream::SendHandshakeMessage(
     const CryptoHandshakeMessage& message) {
   QUIC_DVLOG(1) << ENDPOINT << "Sending "
                 << message.DebugString(session()->perspective());
-  session()->connection()->NeuterUnencryptedPackets();
+  connection()->NeuterUnencryptedPackets();
   session()->OnCryptoHandshakeMessageSent(message);
   const QuicData& data = message.GetSerialized(session()->perspective());
   WriteOrBufferData(QuicStringPiece(data.data(), data.length()), false,

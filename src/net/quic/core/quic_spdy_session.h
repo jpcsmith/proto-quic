@@ -124,7 +124,7 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession : public QuicSession {
   // list.
   void UpdateStreamPriority(QuicStreamId id, SpdyPriority new_priority);
 
-  void OnConfigNegotiated() override;
+  void OnConfigNegotiated(QuicConnection *connection) override;
 
   // Called by |headers_stream_| when |force_hol_blocking_| is true.
   virtual void OnStreamFrameData(QuicStreamId stream_id,
@@ -189,7 +189,7 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession : public QuicSession {
   // If an outgoing stream can be created, return true.
   virtual bool ShouldCreateOutgoingDynamicStream() = 0;
 
-  void OnCryptoHandshakeEvent(CryptoHandshakeEvent event) override;
+  void OnCryptoHandshakeEvent(QuicConnection* connection, CryptoHandshakeEvent event) override;
 
   bool supports_push_promise() { return supports_push_promise_; }
 
@@ -212,7 +212,7 @@ class QUIC_EXPORT_PRIVATE QuicSpdySession : public QuicSession {
   // server side.
   void UpdateEnableServerPush(bool value);
 
-  bool IsConnected() { return connection()->connected(); }
+  bool IsConnected() { return connected(); }
 
  private:
   friend class test::QuicSpdySessionPeer;

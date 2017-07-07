@@ -55,8 +55,7 @@ void QuicStreamSequencer::OnStreamFrame(const QuicStreamFrame& frame) {
   if (result != QUIC_NO_ERROR) {
     string details = QuicStrCat(
         "Stream ", stream_->id(), ": ", QuicErrorCodeToString(result), ": ",
-        error_details, "\nPeer Address: ",
-        stream_->PeerAddressOfLatestPacket().ToString());
+        error_details);
     QUIC_LOG_FIRST_N(WARNING, 50) << QuicErrorCodeToString(result);
     QUIC_LOG_FIRST_N(WARNING, 50) << details;
     stream_->CloseConnectionWithDetails(result, details);

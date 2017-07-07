@@ -49,7 +49,7 @@ QuicStream::PendingData::~PendingData() {}
 
 QuicStream::QuicStream(QuicStreamId id, QuicSession* session)
     : queued_data_bytes_(0),
-      sequencer_(this, session->connection()->clock()),
+      sequencer_(this, session->AnyConnection()->clock()),
       id_(id),
       session_(session),
       stream_bytes_read_(0),
@@ -64,7 +64,7 @@ QuicStream::QuicStream(QuicStreamId id, QuicSession* session)
       rst_sent_(false),
       rst_received_(false),
       perspective_(session_->perspective()),
-      flow_controller_(session_->connection(),
+      flow_controller_(session_->connection_manager(),
                        id_,
                        perspective_,
                        GetReceivedFlowControlWindow(session),
@@ -175,7 +175,7 @@ void QuicStream::Reset(QuicRstStreamErrorCode error) {
 
 void QuicStream::CloseConnectionWithDetails(QuicErrorCode error,
                                             const string& details) {
-  session()->connection()->CloseConnection(
+  session()->CloseConnection(
       error, details, ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
 }
 
@@ -398,16 +398,12 @@ bool QuicStream::HasBufferedData() const {
 }
 
 QuicVersion QuicStream::version() const {
-  return session_->connection()->version();
+  return session_->AnyConnection()->version();
 }
 
 void QuicStream::StopReading() {
   QUIC_DLOG(INFO) << ENDPOINT << "Stop reading from stream " << id();
   sequencer_.StopReading();
-}
-
-const QuicSocketAddress& QuicStream::PeerAddressOfLatestPacket() const {
-  return session_->connection()->last_packet_source_address();
 }
 
 void QuicStream::OnClose() {

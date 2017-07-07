@@ -35,7 +35,8 @@ class QUIC_EXPORT_PRIVATE QuicCryptoStream
     : public QuicStream,
       public CryptoFramerVisitorInterface {
  public:
-  explicit QuicCryptoStream(QuicSession* session);
+      explicit QuicCryptoStream(QuicSession* session);
+      explicit QuicCryptoStream(QuicSession* session, QuicConnection* connection);
 
   ~QuicCryptoStream() override;
 
@@ -85,8 +86,14 @@ class QUIC_EXPORT_PRIVATE QuicCryptoStream
   QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters>
       crypto_negotiated_params_;
 
+  QuicConnection* connection() { return connection_; }
+
  private:
   CryptoFramer crypto_framer_;
+
+  // The connection on which the crypto handshake should be performed.
+  // (not owned)
+  QuicConnection* connection_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicCryptoStream);
 };

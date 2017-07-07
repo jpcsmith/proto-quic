@@ -26,7 +26,8 @@ namespace net {
 QuicSession::QuicSession(QuicConnection* connection,
                          Visitor* owner,
                          const QuicConfig& config)
-    : visitor_(owner),
+    : connection_manager_(new QuicConnectionManager(connection)),
+      visitor_(owner),
       config_(config),
       max_open_outgoing_streams_(kDefaultMaxStreamsPerConnection),
       max_open_incoming_streams_(config_.GetMaxIncomingDynamicStreamsToSend()),
@@ -37,7 +38,7 @@ QuicSession::QuicSession(QuicConnection* connection,
       num_draining_incoming_streams_(0),
       num_locally_closed_incoming_streams_highest_offset_(0),
       error_(QUIC_NO_ERROR),
-      flow_controller_(connection,
+      flow_controller_(connection_manager_,
                        0,
                        connection->perspective(),
                        kMinimumFlowControlSendWindow,
@@ -46,12 +47,11 @@ QuicSession::QuicSession(QuicConnection* connection,
                        nullptr),
       currently_writing_stream_id_(0),
       respect_goaway_(true) {
-  connection_manager_ = new QuicConnectionManager(connection);
 }
 
 void QuicSession::Initialize() {
   connection_manager_->set_visitor(this);
-  connection()->SetFromConfig(config_);
+  InitialConnection()->SetFromConfig(config_);
 
   DCHECK_EQ(kCryptoStreamId, GetMutableCryptoStream()->id());
   static_stream_map_[kCryptoStreamId] = GetMutableCryptoStream();
@@ -89,7 +89,7 @@ void QuicSession::OnStreamFrame(const QuicStreamFrame& frame) {
 
 void QuicSession::OnRstStream(const QuicRstStreamFrame& frame) {
   if (QuicContainsKey(static_stream_map_, frame.stream_id)) {
-    connection()->CloseConnection(
+    CloseConnection(
         QUIC_INVALID_STREAM_ID, "Attempt to reset a static stream",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return;
@@ -115,7 +115,7 @@ void QuicSession::OnGoAway(const QuicGoAwayFrame& frame) {
 void QuicSession::OnConnectionClosed(QuicErrorCode error,
                                      const string& error_details,
                                      ConnectionCloseSource source) {
-  DCHECK(!connection()->connected());
+  DCHECK(!connected());
   if (error_ == QUIC_NO_ERROR) {
     error_ = error;
   }
@@ -132,7 +132,7 @@ void QuicSession::OnConnectionClosed(QuicErrorCode error,
   }
 
   if (visitor_) {
-    visitor_->OnConnectionClosed(connection()->connection_id(), error,
+    visitor_->OnConnectionClosed(connection_id(), error,
                                  error_details);
   }
 }
@@ -147,12 +147,6 @@ void QuicSession::OnSuccessfulVersionNegotiation(
     const QuicVersion& /*version*/) {}
 
 void QuicSession::OnPathDegrading() {}
-
-void QuicSession::OnAckFrame(const QuicAckFrame& frame) {}
-
-void QuicSession::OnHandshakeComplete() {}
-
-void QuicSession::OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) {}
 
 void QuicSession::OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {
   // Stream may be closed by the time we receive a WINDOW_UPDATE, so we can't
@@ -236,18 +230,18 @@ void QuicSession::OnCanWrite(QuicConnection *connection) {
   }
 
   QuicConnection::ScopedPacketBundler ack_bundler(
-      connection(), QuicConnection::SEND_ACK_IF_QUEUED);
+      connection, QuicConnection::SEND_ACK_IF_QUEUED);
   for (size_t i = 0; i < num_writes; ++i) {
     if (!(write_blocked_streams_.HasWriteBlockedCryptoOrHeadersStream() ||
           write_blocked_streams_.HasWriteBlockedDataStreams())) {
       // Writing one stream removed another!? Something's broken.
       QUIC_BUG << "WriteBlockedStream is missing";
-      connection()->CloseConnection(QUIC_INTERNAL_ERROR,
-                                   "WriteBlockedStream is missing",
-                                   ConnectionCloseBehavior::SILENT_CLOSE);
+      CloseConnection(QUIC_INTERNAL_ERROR,
+                      "WriteBlockedStream is missing",
+                      ConnectionCloseBehavior::SILENT_CLOSE);
       return;
     }
-    if (!connection()->CanWriteStreamData()) {
+    if (!connection->CanWriteStreamData()) {
       return;
     }
     currently_writing_stream_id_ = write_blocked_streams_.PopFront();
@@ -306,7 +300,7 @@ QuicConsumedData QuicSession::WritevData(
   // seems like a reasonable mitigation.
   if (id == kCryptoStreamId && stream != GetMutableCryptoStream()) {
     QUIC_BUG << "Stream id mismatch";
-    connection()->CloseConnection(
+    CloseConnection(
         QUIC_INTERNAL_ERROR,
         "Non-crypto stream attempted to write data as crypto stream.",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
@@ -317,7 +311,7 @@ QuicConsumedData QuicSession::WritevData(
     // up write blocked until OnCanWrite is next called.
     return QuicConsumedData(0, false);
   }
-  QuicConsumedData data = connection()->SendStreamData(id, iov, offset, state,
+  QuicConsumedData data = connection_manager_->SendStreamData(id, iov, offset, state,
                                                       std::move(ack_listener));
   write_blocked_streams_.UpdateBytesForStream(id, data.bytes_consumed);
   return data;
@@ -331,9 +325,9 @@ void QuicSession::SendRstStream(QuicStreamId id,
     return;
   }
 
-  if (connection()->connected()) {
+  if (connected()) {
     // Only send a RST_STREAM frame if still connected.
-    connection()->SendRstStream(id, error, bytes_written);
+    connection_manager_->SendRstStream(id, error, bytes_written);
   }
   CloseStreamInner(id, true);
 }
@@ -343,7 +337,7 @@ void QuicSession::SendGoAway(QuicErrorCode error_code, const string& reason) {
     return;
   }
 
-  connection()->SendGoAway(error_code, largest_peer_created_stream_id_, reason);
+  connection_manager_->SendGoAway(error_code, largest_peer_created_stream_id_, reason);
 }
 
 void QuicSession::CloseStream(QuicStreamId stream_id) {
@@ -400,7 +394,7 @@ void QuicSession::CloseStreamInner(QuicStreamId stream_id, bool locally_reset) {
 
   stream->OnClose();
   // Decrease the number of streams being emulated when a new one is opened.
-  connection()->SetNumOpenStreams(dynamic_stream_map_.size());
+  connection_manager_->SetNumOpenStreams(dynamic_stream_map_.size());
 }
 
 void QuicSession::OnFinalByteOffsetReceived(
@@ -419,7 +413,7 @@ void QuicSession::OnFinalByteOffsetReceived(
           flow_controller_.highest_received_byte_offset() + offset_diff)) {
     // If the final offset violates flow control, close the connection now.
     if (flow_controller_.FlowControlViolation()) {
-      connection()->CloseConnection(
+      CloseConnection(
           QUIC_FLOW_CONTROL_RECEIVED_TOO_MUCH_DATA,
           "Connection level flow control violation",
           ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
@@ -442,8 +436,8 @@ bool QuicSession::IsCryptoHandshakeConfirmed() const {
   return GetCryptoStream()->handshake_confirmed();
 }
 
-void QuicSession::OnConfigNegotiated() {
-  connection()->SetFromConfig(config_);
+void QuicSession::OnConfigNegotiated(QuicConnection *connection) {
+  InitialConnection()->SetFromConfig(config_);
 
   uint32_t max_streams = 0;
   if (config_.HasReceivedMaxIncomingDynamicStreams()) {
@@ -529,7 +523,7 @@ void QuicSession::HandleFrameOnNonexistentOutgoingStream(
   DCHECK(!IsClosedStream(stream_id));
   // Received a frame for a locally-created stream that is not currently
   // active. This is an error.
-  connection()->CloseConnection(
+  CloseConnection(
       QUIC_INVALID_STREAM_ID, "Data for nonexistent stream",
       ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
 }
@@ -551,8 +545,8 @@ void QuicSession::OnNewStreamFlowControlWindow(QuicStreamOffset new_window) {
     QUIC_LOG_FIRST_N(ERROR, 1)
         << "Peer sent us an invalid stream flow control send window: "
         << new_window << ", below default: " << kMinimumFlowControlSendWindow;
-    if (connection()->connected()) {
-      connection()->CloseConnection(
+    if (connected()) {
+      CloseConnection(
           QUIC_FLOW_CONTROL_INVALID_WINDOW, "New stream window too low",
           ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     }
@@ -573,8 +567,8 @@ void QuicSession::OnNewSessionFlowControlWindow(QuicStreamOffset new_window) {
     QUIC_LOG_FIRST_N(ERROR, 1)
         << "Peer sent us an invalid session flow control send window: "
         << new_window << ", below default: " << kMinimumFlowControlSendWindow;
-    if (connection()->connected()) {
-      connection()->CloseConnection(
+    if (connected()) {
+      CloseConnection(
           QUIC_FLOW_CONTROL_INVALID_WINDOW, "New connection window too low",
           ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     }
@@ -584,21 +578,21 @@ void QuicSession::OnNewSessionFlowControlWindow(QuicStreamOffset new_window) {
   flow_controller_.UpdateSendWindowOffset(new_window);
 }
 
-void QuicSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
+void QuicSession::OnCryptoHandshakeEvent(QuicConnection *connection, CryptoHandshakeEvent event) {
   switch (event) {
     // TODO(satyamshekhar): Move the logic of setting the encrypter/decrypter
     // to QuicSession since it is the glue.
     case ENCRYPTION_FIRST_ESTABLISHED:
       // Given any streams blocked by encryption a chance to write.
-      OnCanWrite();
+      OnCanWrite(connection);
       break;
 
     case ENCRYPTION_REESTABLISHED:
       // Retransmit originally packets that were sent, since they can't be
       // decrypted by the peer.
-      connection()->RetransmitUnackedPackets(ALL_INITIAL_RETRANSMISSION);
+      connection->RetransmitUnackedPackets(ALL_INITIAL_RETRANSMISSION);
       // Given any streams blocked by encryption a chance to write.
-      OnCanWrite();
+      OnCanWrite(connection);
       break;
 
     case HANDSHAKE_CONFIRMED:
@@ -606,7 +600,7 @@ void QuicSession::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
           << ENDPOINT << "Handshake confirmed without parameter negotiation.";
       // Discard originally encrypted packets, since they can't be decrypted by
       // the peer.
-      connection()->NeuterUnencryptedPackets();
+      connection->NeuterUnencryptedPackets();
       connection_manager()->OnHandshakeComplete();
       break;
 
@@ -636,7 +630,7 @@ void QuicSession::ActivateStream(std::unique_ptr<QuicStream> stream) {
     ++num_dynamic_incoming_streams_;
   }
   // Increase the number of streams being emulated when a new one is opened.
-  connection()->SetNumOpenStreams(dynamic_stream_map_.size());
+  connection_manager_->SetNumOpenStreams(dynamic_stream_map_.size());
 }
 
 QuicStreamId QuicSession::GetNextOutgoingStreamId() {
@@ -684,7 +678,7 @@ bool QuicSession::MaybeIncreaseLargestPeerStreamId(
                     << " streams available, which would become "
                     << new_num_available_streams << ", which exceeds the limit "
                     << MaxAvailableStreams() << ".";
-    connection()->CloseConnection(
+    CloseConnection(
         QUIC_TOO_MANY_AVAILABLE_STREAMS,
         QuicStrCat(new_num_available_streams, " above ", MaxAvailableStreams()),
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
@@ -762,11 +756,11 @@ void QuicSession::set_max_open_outgoing_streams(
 }
 
 bool QuicSession::goaway_sent() const {
-  return connection()->goaway_sent();
+  return connection_manager_->goaway_sent();
 }
 
 bool QuicSession::goaway_received() const {
-  return connection()->goaway_received();
+  return connection_manager_->goaway_received();
 }
 
 bool QuicSession::IsClosedStream(QuicStreamId id) {
@@ -809,6 +803,13 @@ size_t QuicSession::GetNumOpenOutgoingStreams() const {
          GetNumDrainingOutgoingStreams();
 }
 
+void QuicSession::CloseConnection(
+    QuicErrorCode error,
+    const std::string& details,
+    ConnectionCloseBehavior connection_close_behavior) {
+  connection_manager_->CloseConnection(error, details, connection_close_behavior);
+}
+
 size_t QuicSession::GetNumActiveStreams() const {
   return dynamic_stream_map_.size() - draining_streams_.size();
 }
@@ -827,7 +828,7 @@ void QuicSession::MarkConnectionLevelWriteBlocked(QuicStreamId id) {
 bool QuicSession::HasDataToWrite() const {
   return write_blocked_streams_.HasWriteBlockedCryptoOrHeadersStream() ||
          write_blocked_streams_.HasWriteBlockedDataStreams() ||
-         connection()->HasQueuedData();
+         connection_manager_->HasQueuedData();
 }
 
 void QuicSession::PostProcessAfterData() {
@@ -892,7 +893,7 @@ bool QuicSession::ShouldCreateIncomingDynamicStream2(QuicStreamId id) {
     QUIC_DLOG(INFO) << "invalid incoming stream id: " << id;
     return false;
   }
-  if (!connection()->connected()) {
+  if (!connected()) {
     QUIC_DLOG(INFO)
         << "ShouldCreateIncomingDynamicStream called when disconnected";
     return false;
@@ -908,7 +909,7 @@ bool QuicSession::ShouldCreateIncomingDynamicStream2(QuicStreamId id) {
 
 bool QuicSession::ShouldCreateOutgoingDynamicStream2() {
   DCHECK(FLAGS_quic_reloadable_flag_quic_refactor_stream_creation);
-  if (!connection()->connected()) {
+  if (!connected()) {
     QUIC_DLOG(INFO)
         << "ShouldCreateOutgoingDynamicStream called when disconnected";
     return false;

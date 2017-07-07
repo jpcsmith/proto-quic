@@ -27,15 +27,15 @@ QuicClientSessionBase::~QuicClientSessionBase() {
     QUIC_DVLOG(1) << "erase stream " << it.first << " url " << it.second->url();
     push_promise_index_->promised_by_url()->erase(it.second->url());
   }
-  delete connection();
+  delete InitialConnection();
 }
 
-void QuicClientSessionBase::OnConfigNegotiated() {
-  QuicSpdySession::OnConfigNegotiated();
+void QuicClientSessionBase::OnConfigNegotiated(QuicConnection *connection) {
+  QuicSpdySession::OnConfigNegotiated(connection);
 }
 
-void QuicClientSessionBase::OnCryptoHandshakeEvent(CryptoHandshakeEvent event) {
-  QuicSpdySession::OnCryptoHandshakeEvent(event);
+void QuicClientSessionBase::OnCryptoHandshakeEvent(QuicConnection* connection, CryptoHandshakeEvent event) {
+  QuicSpdySession::OnCryptoHandshakeEvent(connection, event);
 }
 
 void QuicClientSessionBase::OnInitialHeadersComplete(
@@ -60,7 +60,7 @@ void QuicClientSessionBase::OnPromiseHeaderList(
     const QuicHeaderList& header_list) {
   if (promised_stream_id != kInvalidStreamId &&
       promised_stream_id <= largest_promised_stream_id_) {
-    connection()->CloseConnection(
+    CloseConnection(
         QUIC_INVALID_STREAM_ID,
         "Received push stream id lesser or equal to the"
         " last accepted before",

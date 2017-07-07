@@ -49,7 +49,7 @@ class QUIC_EXPORT_PRIVATE QuicServerSessionBase : public QuicSpdySession {
 
   // Sends a server config update to the client, containing new bandwidth
   // estimate.
-  void OnCongestionWindowChange(QuicTime now) override;
+  void OnCongestionWindowChange(QuicConnection *connection, QuicTime now) override;
 
   ~QuicServerSessionBase() override;
 
@@ -61,7 +61,7 @@ class QUIC_EXPORT_PRIVATE QuicServerSessionBase : public QuicSpdySession {
 
   // Override base class to process bandwidth related config received from
   // client.
-  void OnConfigNegotiated() override;
+  void OnConfigNegotiated(QuicConnection *connection) override;
 
   void set_serving_region(const std::string& serving_region) {
     serving_region_ = serving_region;

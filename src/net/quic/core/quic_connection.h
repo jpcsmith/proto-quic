@@ -55,6 +55,7 @@ class QuicConnection;
 class QuicDecrypter;
 class QuicEncrypter;
 class QuicRandom;
+class QuicConnectionManager;
 
 namespace test {
 class PacketSavingConnection;
@@ -164,9 +165,11 @@ class QUIC_EXPORT_PRIVATE QuicConnectionVisitorInterface {
   virtual bool HasOpenDynamicStreams(const QuicSubflowId& subflowId) const = 0;
 
   // Called whenever an ACK frame is received
-  virtual void OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame) = 0;
+  virtual void OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame, const QuicTime& arrival_time_of_packet) = 0;
 
   virtual void OnSubflowCloseFrame(const QuicSubflowId& subflowId, const QuicSubflowCloseFrame& frame) = 0;
+
+  virtual void OnRetransmission(const QuicTransmissionInfo& transmission_info) = 0;
 };
 
 // Interface which gets callbacks from the QuicConnection at interesting
@@ -296,7 +299,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
     : public QuicFramerVisitorInterface,
       public QuicBlockedWriterInterface,
       public QuicPacketGenerator::DelegateInterface,
-      public QuicSentPacketManager::NetworkChangeVisitor {
+      public QuicSentPacketManager::NetworkChangeVisitor,
+      public QuicSentPacketManager::RetransmissionVisitor {
  public:
   enum AckBundling {
     // Send an ack if it's already queued in the connection.
@@ -343,7 +347,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
                  QuicPacketWriter* writer,
                  bool owns_writer,
                  Perspective perspective,
-                 const QuicVersionVector& supported_versions);
+                 const QuicVersionVector& supported_versions,
+                 QuicSubflowId subflow_id);
   QuicConnection(QuicConnectionId connection_id,
                  QuicSocketAddress self_address,
                  QuicSocketAddress peer_address,
@@ -355,7 +360,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
                  const QuicVersionVector& supported_versions,
                  QuicFramer *framer,
                  bool owns_framer,
-                 bool do_not_perform_handshake);
+                 bool do_not_perform_handshake,
+                 QuicSubflowId subflow_id);
   ~QuicConnection() override;
 
   // Creates a connection for a new subflow connected to |address|. The new
@@ -378,8 +384,18 @@ class QUIC_EXPORT_PRIVATE QuicConnection
     return first_subflow_close_frame_packet_number_ <= largestAckedPacketNumber;
   }
 
+  void HandleIncomingAckFrame(
+      const QuicAckFrame& frame,
+      const QuicTime& arrival_time_of_packet) = 0;
+
+  // Adds a NEW_SUBFLOW frame as the first frame in every sent packet.
   void PrependNewSubflowFrame(QuicSubflowId subflowId);
+
+  // Adds a SUBFLOW_CLOSE frame as the first frame in every sent packet.
   void PrependSubflowCloseFrame(QuicSubflowId subflowId);
+
+  // Removes any frame that was prepended in a packet (only takes effect
+  // in the next packet).
   void RemovePrependedFrames();
 
   // Sets connection parameters from the supplied |config|.
@@ -429,14 +445,6 @@ class QUIC_EXPORT_PRIVATE QuicConnection
 
   // Send a WINDOW_UPDATE frame to the peer.
   virtual void SendWindowUpdate(QuicStreamId id, QuicStreamOffset byte_offset);
-
-  // Closes the connection.
-  // |connection_close_behavior| determines whether or not a connection close
-  // packet is sent to the peer.
-  virtual void CloseConnection(
-      QuicErrorCode error,
-      const std::string& details,
-      ConnectionCloseBehavior connection_close_behavior);
 
   // Sends a GOAWAY frame. Does nothing if a GOAWAY frame has already been sent.
   virtual void SendGoAway(QuicErrorCode error,
@@ -493,6 +501,9 @@ class QUIC_EXPORT_PRIVATE QuicConnection
     return framer_->supported_versions();
   }
 
+  // From RetransmissionVisitor
+  void OnRetransmission(const QuicTransmissionInfo& transmission_info) override;
+
   // From QuicFramerVisitorInterface
   void OnError(QuicFramer* framer) override;
   bool OnProtocolVersionMismatch(QuicVersion received_version) override;
@@ -527,7 +538,7 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   // QuicPacketGenerator::DelegateInterface
   bool ShouldGeneratePacket(HasRetransmittableData retransmittable,
                             IsHandshake handshake) override;
-  const QuicFrame GetUpdatedAckFrame() override;
+  const QuicFrames GetUpdatedAckFrames() override;
   void PopulateStopWaitingFrame(QuicStopWaitingFrame* stop_waiting) override;
 
   // QuicPacketCreator::DelegateInterface
@@ -573,10 +584,6 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   size_t mtu_probe_count() const { return mtu_probe_count_; }
 
   bool connected() const { return connected_; }
-
-  bool goaway_sent() const { return goaway_sent_; }
-
-  bool goaway_received() const { return goaway_received_; }
 
   // Must only be called on client connections.
   const QuicVersionVector& server_supported_versions() const {
@@ -824,6 +831,19 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   virtual void OnSelfAddressChange() {}
 
  private:
+  // Make sure only the connection manager calls CloseConnection()
+  friend class QuicConnectionManager;
+
+  // Closes the connection.
+  // |connection_close_behavior| determines whether or not a connection close
+  // packet is sent to the peer.
+  virtual void CloseConnection(
+      QuicErrorCode error,
+      const std::string& details,
+      ConnectionCloseBehavior connection_close_behavior);
+
+
+
   friend class test::QuicConnectionPeer;
   friend class test::PacketSavingConnection;
 
@@ -1150,12 +1170,6 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   // The size of the largest packet received from peer.
   QuicByteCount largest_received_packet_size_;
 
-  // Whether a GoAway has been sent.
-  bool goaway_sent_;
-
-  // Whether a GoAway has been received.
-  bool goaway_received_;
-
   // Indicates whether a write error is encountered currently. This is used to
   // avoid infinite write errors.
   bool write_error_occured_;
@@ -1172,6 +1186,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   // bool should_send_new_subflow_frame_;
 
   enum SubflowState subflow_state_;
+
+  QuicSubflowId subflow_id_;
 
   QuicPacketNumber first_subflow_close_frame_packet_number_;
 

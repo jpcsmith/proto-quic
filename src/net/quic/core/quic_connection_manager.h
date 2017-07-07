@@ -59,7 +59,7 @@ public:
   virtual void OnCanWrite(QuicConnection* connection) = 0;
 
   // Called when the connection experiences a change in congestion window.
-  virtual void OnCongestionWindowChange(QuicTime now) = 0;
+  virtual void OnCongestionWindowChange(QuicConnection* connection, QuicTime now) = 0;
 
   // Called when the connection receives a packet from a migrated client.
   virtual void OnConnectionMigration(PeerAddressChangeType type) = 0;
@@ -102,27 +102,59 @@ public:
     visitor_ = visitor;
   }
 
+  // Returns the initially created connection, which was passed to the session
+  // in the constructor.
   QuicConnection *InitialConnection() const {
-    //QUIC_DLOG(INFO) << "connections_ (" << connections_.size() << "): ";
-    //for(auto elem : connections_)
-    //{
-    //  QUIC_DLOG(INFO) << elem.first << ": " << elem.second << "\n";
-    //}
     return connections_.at(kInitialSubflowId);
   }
-
-  void set_current_subflow_id(QuicSubflowId id) { current_subflow_id_ = id; }
-
-  QuicConnection *connection() const {
+  // Returns the connection that was marked as the currently active connection.
+  QuicConnection *CurrentConnection() const {
     return connections_.find(current_subflow_id_)->second;
-    //return connections_[current_subflow_id_];
   }
-
+  // Returns a connection on some subflow.
   QuicConnection *AnyConnection() const {
     QUIC_BUG_IF(connections_.size()==0) << "There are no connections";
     return connections_.begin()->second;
   }
+  // Returns a connection on a specific subflow.
+  QuicConnection *ConnectionOfSubflow(QuicSubflowDescriptor descriptor) {
+    return connections_[subflow_descriptor_map_[descriptor]];
+  }
 
+  // Marks the connection with the subflow id |id| as the currently active connection.
+  void set_current_subflow_id(QuicSubflowId id) { current_subflow_id_ = id; }
+
+  // Flow control
+  QuicTime::Delta SmoothedRttForFlowController() {
+    //TODO correctly handle flow control
+    return InitialConnection()->sent_packet_manager().GetRttStats()->smoothed_rtt();
+  }
+
+  // QUIC connection control
+  void CloseConnection(
+      QuicErrorCode error,
+      const std::string& details,
+      ConnectionCloseBehavior connection_close_behavior);
+  bool HasQueuedData();
+  void SetNumOpenStreams(size_t num_streams);
+  virtual QuicConsumedData SendStreamData(
+      QuicStreamId id,
+      QuicIOVector iov,
+      QuicStreamOffset offset,
+      StreamSendingState state,
+      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
+  virtual void SendRstStream(QuicStreamId id,
+                             QuicRstStreamErrorCode error,
+                             QuicStreamOffset bytes_written);
+  virtual void SendBlocked(QuicStreamId id);
+  virtual void SendWindowUpdate(QuicStreamId id, QuicStreamOffset byte_offset);
+  virtual void SendGoAway(QuicErrorCode error,
+                          QuicStreamId last_good_stream_id,
+                          const std::string& reason);
+  bool goaway_sent() const { return goaway_sent_; }
+  bool goaway_received() const { return goaway_received_; }
+
+  // Subflow control
   void TryAddingSubflow(QuicSubflowDescriptor descriptor);
   void AddPacketWriter(QuicSubflowDescriptor descriptor, QuicPacketWriter *writer);
   void CloseSubflow(QuicSubflowId id);
@@ -157,8 +189,9 @@ public:
   bool WillingAndAbleToWrite(const QuicSubflowId& subflowId) const override;
   bool HasPendingHandshake(const QuicSubflowId& subflowId) const override;
   bool HasOpenDynamicStreams(const QuicSubflowId& subflowId) const override;
-  void OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame) override;
+  void OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame, const QuicTime& arrival_time_of_packet) override;
   void OnSubflowCloseFrame(const QuicSubflowId& subflowId, const QuicSubflowCloseFrame& frame) override;
+  void OnRetransmission(const QuicTransmissionInfo& transmission_info) override;
 
 
 
@@ -288,6 +321,12 @@ private:
   bool IsValidOutgoingSubflowId(QuicSubflowId id);
 
   QuicConnectionManagerVisitorInterface *visitor_;
+
+  // Whether a GoAway has been sent.
+  bool goaway_sent_;
+
+  // Whether a GoAway has been received.
+  bool goaway_received_;
 
   // owns the QuicConnection objects
   std::map<QuicSubflowId, QuicConnection*> connections_;

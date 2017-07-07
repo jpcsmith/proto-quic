@@ -252,8 +252,12 @@ bool QuicPacketGenerator::HasPendingFrames() const {
 
 bool QuicPacketGenerator::AddNextPendingFrame() {
   if (should_send_ack_) {
-    should_send_ack_ =
-        !packet_creator_.AddSavedFrame(delegate_->GetUpdatedAckFrame());
+    should_send_ack_ = false;
+    for(const QuicFrame &frame: delegate_->GetUpdatedAckFrames()) {
+      if(!packet_creator_.AddSavedFrame(frame)) {
+        should_send_ack_ = true;
+      }
+    }
     return !should_send_ack_;
   }
 

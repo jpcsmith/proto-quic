@@ -96,7 +96,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
   void OnWriteBlocked(QuicBlockedWriterInterface* blocked_writer) override;
   void OnSuccessfulVersionNegotiation(const QuicVersion& version) override;
   void OnCanWrite(QuicConnection* connection) override;
-  void OnCongestionWindowChange(QuicTime /*now*/) override {}
+  void OnCongestionWindowChange(QuicConnection* connection, QuicTime /*now*/) override {}
   void OnConnectionMigration(PeerAddressChangeType type) override {}
   // Deletes streams that are safe to be deleted now that it's safe to do so (no
   // other operations are being done on the streams at this time).
@@ -107,9 +107,6 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
   bool HasPendingHandshake() const override;
   bool HasOpenDynamicStreams() const override;
   void OnPathDegrading() override;
-  void OnAckFrame(const QuicAckFrame& frame) override;
-  void OnHandshakeComplete() override;
-  void OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override;
 
   // Called on every incoming packet. Passes |packet| through to |connection_|.
   virtual void ProcessUdpPacket(const QuicSocketAddress& self_address,
@@ -151,7 +148,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
   virtual bool IsCryptoHandshakeConfirmed() const;
 
   // Called by the QuicCryptoStream when a new QuicConfig has been negotiated.
-  virtual void OnConfigNegotiated();
+  virtual void OnConfigNegotiated(QuicConnection* connection);
 
   // Called by the QuicCryptoStream when the handshake enters a new state.
   //
@@ -161,7 +158,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
   //   HANDSHAKE_CONFIRMED
   //
   // Servers will simply call it once with HANDSHAKE_CONFIRMED.
-  virtual void OnCryptoHandshakeEvent(CryptoHandshakeEvent event);
+  virtual void OnCryptoHandshakeEvent(QuicConnection* connection, CryptoHandshakeEvent event);
 
   // Called by the QuicCryptoStream when a handshake message is sent.
   virtual void OnCryptoHandshakeMessageSent(
@@ -180,16 +177,31 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
   // not yet been created.
   bool IsClosedStream(QuicStreamId id);
 
-  QuicConnection* connection() { return connection_manager_->connection(); }
-  const QuicConnection* connection() const { return connection_manager_->connection(); }
+  //QuicConnection* connection() { return connection_manager_->connection(); }
+  //const QuicConnection* connection() const { return connection_manager_->connection(); }
+  QuicConnection* AnyConnection() { return connection_manager_->AnyConnection(); }
+  QuicConnection* InitialConnection() { return connection_manager_->InitialConnection(); }
+  const QuicConnection* AnyConnection() const { return connection_manager_->AnyConnection(); }
+  const QuicConnection* InitialConnection() const { return connection_manager_->InitialConnection(); }
+
   QuicConnectionManager* connection_manager() { return connection_manager_; }
+
   size_t num_active_requests() const { return dynamic_stream_map_.size(); }
   const QuicSocketAddress& peer_address() const {
-    return connection()->peer_address();
+    return InitialConnection()->peer_address();
   }
   QuicConnectionId connection_id() const {
-    return connection()->connection_id();
+    return AnyConnection()->connection_id();
   }
+  bool connected() const {
+    return AnyConnection()->connected();
+  }
+
+  // Closes the connection with all of its subflows.
+  void CloseConnection(
+      QuicErrorCode error,
+      const std::string& details,
+      ConnectionCloseBehavior connection_close_behavior);
 
   // Returns the number of currently open streams, excluding the reserved
   // headers and crypto streams, and never counting unfinished streams.
@@ -223,7 +235,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
 
   QuicErrorCode error() const { return error_; }
 
-  Perspective perspective() const { return connection()->perspective(); }
+  Perspective perspective() const { return AnyConnection()->perspective(); }
 
   QuicFlowController* flow_controller() { return &flow_controller_; }
 

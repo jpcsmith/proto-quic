@@ -137,7 +137,7 @@ bool QuicClientBase::Connect() {
     // The overall connection failed due too many stateless rejects.
     set_connection_error(QUIC_CRYPTO_TOO_MANY_REJECTS);
   }
-  return session()->connection()->connected();
+  return session()->connected();
 }
 
 void QuicClientBase::StartConnect() {
@@ -160,7 +160,8 @@ void QuicClientBase::StartConnect() {
       GetNextConnectionId(), GetLatestClientAddress(),
       server_address(), helper(), alarm_factory(),
       writer,
-      /* owns_writer= */ false, Perspective::IS_CLIENT, supported_versions()));
+      /* owns_writer= */ false, Perspective::IS_CLIENT, supported_versions(),
+      kInitialSubflowId));
 
   // Reset |writer()| after |session()| so that the old writer outlives the old
   // session.
@@ -174,7 +175,7 @@ void QuicClientBase::Disconnect() {
   DCHECK(initialized_);
 
   if (connected()) {
-    session()->connection()->CloseConnection(
+    session()->CloseConnection(
         QUIC_PEER_GOING_AWAY, "Client disconnecting",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
   }
@@ -195,14 +196,14 @@ QuicClientSession* QuicClientBase::CreateQuicClientSession(
   session_.reset(new QuicClientSession(config_, connection, server_id_,
                                        &crypto_config_, &push_promise_index_));
   if (initial_max_packet_length_ != 0) {
-    session()->connection()->SetMaxPacketLength(initial_max_packet_length_);
+    session()->InitialConnection()->SetMaxPacketLength(initial_max_packet_length_);
   }
   return session_.get();
 }
 
 bool QuicClientBase::EncryptionBeingEstablished() {
   return !session_->IsEncryptionEstablished() &&
-         session_->connection()->connected();
+         session_->connected();
 }
 
 void QuicClientBase::SendRequest(const SpdyHeaderBlock& headers,
@@ -285,7 +286,8 @@ bool QuicClientBase::WaitForEvents() {
 }
 
 bool QuicClientBase::MigrateSocket(const QuicIpAddress& new_host) {
-  if (!connected()) {
+  return false;
+  /*if (!connected()) {
     return false;
   }
 
@@ -302,7 +304,7 @@ bool QuicClientBase::MigrateSocket(const QuicIpAddress& new_host) {
   set_writer(writer);
   session()->connection()->SetQuicPacketWriter(writer, false);
 
-  return true;
+  return true;*/
 }
 
 void QuicClientBase::WaitForStreamToClose(QuicStreamId id) {
@@ -326,8 +328,7 @@ bool QuicClientBase::WaitForCryptoHandshakeConfirmed() {
 }
 
 bool QuicClientBase::connected() const {
-  return session_.get() && session_->connection() &&
-         session_->connection()->connected();
+  return session_.get() && session_->connected();
 }
 
 bool QuicClientBase::goaway_received() const {

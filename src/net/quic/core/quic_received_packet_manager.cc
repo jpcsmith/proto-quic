@@ -34,6 +34,11 @@ QuicReceivedPacketManager::QuicReceivedPacketManager(QuicConnectionStats* stats)
 
 QuicReceivedPacketManager::~QuicReceivedPacketManager() {}
 
+
+void QuicReceivedPacketManager::SetSubflowId(QuicSubflowId subflow_id) {
+  ack_frame_.subflow_id = subflow_id;
+}
+
 void QuicReceivedPacketManager::RecordPacketReceived(
     const QuicPacketHeader& header,
     QuicTime receipt_time) {

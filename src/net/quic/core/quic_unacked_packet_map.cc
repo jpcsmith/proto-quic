@@ -164,6 +164,15 @@ void QuicUnackedPacketMap::RemoveRetransmittability(
   RemoveRetransmittability(info);
 }
 
+const QuicTransmissionInfo& QuicUnackedPacketMap::ExtractTransmissionInfo(
+    QuicPacketNumber packet_number) {
+  QuicTransmissionInfo* info =
+      &unacked_packets_[packet_number - least_unacked_];
+  QuicTransmissionInfo copy = QuicTransmissionInfo(*info);
+  info->retransmittable_frames = QuicFrames();
+  return copy;
+}
+
 void QuicUnackedPacketMap::IncreaseLargestObserved(
     QuicPacketNumber largest_observed) {
   DCHECK_LE(largest_observed_, largest_observed);

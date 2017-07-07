@@ -481,7 +481,7 @@ bool QuicDispatcher::HasPendingWrites() const {
 void QuicDispatcher::Shutdown() {
   while (!session_map_.empty()) {
     QuicSession* session = session_map_.begin()->second.get();
-    session->connection()->CloseConnection(
+    session->CloseConnection(
         QUIC_PEER_GOING_AWAY, "Server shutdown imminent",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     // Validate that the session removes itself from the session map on close.
@@ -512,7 +512,8 @@ void QuicDispatcher::OnConnectionClosed(QuicConnectionId connection_id,
     delete_sessions_alarm_->Update(helper()->GetClock()->ApproximateNow(),
                                    QuicTime::Delta::Zero());
   }
-  QuicConnection* connection = it->second->connection();
+  //TODO(cyrill) Maybe add all connections to the time wait list?
+  QuicConnection* connection = it->second->InitialConnection();
   closed_session_list_.push_back(std::move(it->second));
   const bool should_close_statelessly =
       (error == QUIC_CRYPTO_HANDSHAKE_STATELESS_REJECT);

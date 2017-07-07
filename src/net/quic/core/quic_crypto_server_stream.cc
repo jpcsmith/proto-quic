@@ -101,7 +101,7 @@ QuicCryptoServerStream::QuicCryptoServerStream(
       chlo_packet_size_(0),
       validate_client_hello_cb_(nullptr),
       process_client_hello_cb_(nullptr) {
-  DCHECK_EQ(Perspective::IS_SERVER, session->connection()->perspective());
+  DCHECK_EQ(Perspective::IS_SERVER, session->AnyConnection()->perspective());
 }
 
 QuicCryptoServerStream::~QuicCryptoServerStream() {
@@ -128,7 +128,7 @@ void QuicCryptoServerStream::OnHandshakeMessage(
     const CryptoHandshakeMessage& message) {
   QuicCryptoServerStreamBase::OnHandshakeMessage(message);
   ++num_handshake_messages_;
-  chlo_packet_size_ = session()->connection()->GetCurrentPacket().length();
+  chlo_packet_size_ = connection()->GetCurrentPacket().length();
 
   // Do not process handshake messages after the handshake is confirmed.
   if (handshake_confirmed_) {
@@ -163,8 +163,8 @@ void QuicCryptoServerStream::OnHandshakeMessage(
   validate_client_hello_cb_ = cb.get();
   crypto_config_->ValidateClientHello(
       message, GetClientAddress().host(),
-      session()->connection()->self_address(), version(),
-      session()->connection()->clock(), signed_config_, std::move(cb));
+      connection()->self_address(), version(),
+      connection()->clock(), signed_config_, std::move(cb));
 }
 
 void QuicCryptoServerStream::FinishProcessingHandshakeMessage(
@@ -214,7 +214,7 @@ void QuicCryptoServerStream::
       // Before sending the SREJ, cause the connection to save crypto packets
       // so that they can be added to the time wait list manager and
       // retransmitted.
-      session()->connection()->EnableSavingCryptoPackets();
+      connection()->EnableSavingCryptoPackets();
     }
     SendHandshakeMessage(*reply);
 
@@ -223,9 +223,9 @@ void QuicCryptoServerStream::
       DCHECK(peer_supports_stateless_rejects_);
       DCHECK(!handshake_confirmed());
       QUIC_DLOG(INFO) << "Closing connection "
-                      << session()->connection()->connection_id()
+                      << connection()->connection_id()
                       << " because of a stateless reject.";
-      session()->connection()->CloseConnection(
+      session()->CloseConnection(
           QUIC_CRYPTO_HANDSHAKE_STATELESS_REJECT, "stateless reject",
           ConnectionCloseBehavior::SILENT_CLOSE);
     }
@@ -245,7 +245,7 @@ void QuicCryptoServerStream::
     return;
   }
 
-  session()->OnConfigNegotiated();
+  session()->OnConfigNegotiated(connection());
 
   config->ToHandshakeMessage(reply.get());
 
@@ -254,32 +254,32 @@ void QuicCryptoServerStream::
   // write key.
   //
   // NOTE: the SHLO will be encrypted with the new server write key.
-  session()->connection()->SetEncrypter(
+  connection()->SetEncrypter(
       ENCRYPTION_INITIAL,
       crypto_negotiated_params_->initial_crypters.encrypter.release());
-  session()->connection()->SetDefaultEncryptionLevel(ENCRYPTION_INITIAL);
+  connection()->SetDefaultEncryptionLevel(ENCRYPTION_INITIAL);
   // Set the decrypter immediately so that we no longer accept unencrypted
   // packets.
-  session()->connection()->SetDecrypter(
+  connection()->SetDecrypter(
       ENCRYPTION_INITIAL,
       crypto_negotiated_params_->initial_crypters.decrypter.release());
-  session()->connection()->SetDiversificationNonce(*diversification_nonce);
+  connection()->SetDiversificationNonce(*diversification_nonce);
 
   SendHandshakeMessage(*reply);
 
-  session()->connection()->SetEncrypter(
+  connection()->SetEncrypter(
       ENCRYPTION_FORWARD_SECURE,
       crypto_negotiated_params_->forward_secure_crypters.encrypter.release());
-  session()->connection()->SetDefaultEncryptionLevel(ENCRYPTION_FORWARD_SECURE);
+  connection()->SetDefaultEncryptionLevel(ENCRYPTION_FORWARD_SECURE);
 
-  session()->connection()->SetAlternativeDecrypter(
+  connection()->SetAlternativeDecrypter(
       ENCRYPTION_FORWARD_SECURE,
       crypto_negotiated_params_->forward_secure_crypters.decrypter.release(),
       false /* don't latch */);
 
   encryption_established_ = true;
   handshake_confirmed_ = true;
-  session()->OnCryptoHandshakeEvent(QuicSession::HANDSHAKE_CONFIRMED);
+  session()->OnCryptoHandshakeEvent(connection(), QuicSession::HANDSHAKE_CONFIRMED);
 }
 
 void QuicCryptoServerStream::SendServerConfigUpdate(
@@ -299,10 +299,10 @@ void QuicCryptoServerStream::SendServerConfigUpdate(
   send_server_config_update_cb_ = cb.get();
 
   crypto_config_->BuildServerConfigUpdateMessage(
-      session()->connection()->version(), chlo_hash_,
-      previous_source_address_tokens_, session()->connection()->self_address(),
-      GetClientAddress().host(), session()->connection()->clock(),
-      session()->connection()->random_generator(), compressed_certs_cache_,
+      connection()->version(), chlo_hash_,
+      previous_source_address_tokens_, connection()->self_address(),
+      GetClientAddress().host(), connection()->clock(),
+      connection()->random_generator(), compressed_certs_cache_,
       *crypto_negotiated_params_, cached_network_params,
       (session()->config()->HasReceivedConnectionOptions()
            ? session()->config()->ReceivedConnectionOptions()
@@ -413,7 +413,7 @@ void QuicCryptoServerStream::ProcessClientHello(
   const CryptoHandshakeMessage& message = result->client_hello;
   string error_details;
   if (!helper_->CanAcceptClientHello(
-          message, session()->connection()->self_address(), &error_details)) {
+          message, connection()->self_address(), &error_details)) {
     done_cb->Run(QUIC_HANDSHAKE_FAILED, error_details, nullptr, nullptr,
                  nullptr);
     return;
@@ -438,15 +438,14 @@ void QuicCryptoServerStream::ProcessClientHello(
   const bool use_stateless_rejects_in_crypto_config =
       use_stateless_rejects_if_peer_supported_ &&
       peer_supports_stateless_rejects_;
-  QuicConnection* connection = session()->connection();
   const QuicConnectionId server_designated_connection_id =
       GenerateConnectionIdForReject(use_stateless_rejects_in_crypto_config);
   crypto_config_->ProcessClientHello(
-      result, /*reject_only=*/false, connection->connection_id(),
-      connection->self_address(), GetClientAddress(), version(),
-      connection->supported_versions(), use_stateless_rejects_in_crypto_config,
-      server_designated_connection_id, connection->clock(),
-      connection->random_generator(), compressed_certs_cache_,
+      result, /*reject_only=*/false, connection()->connection_id(),
+      connection()->self_address(), GetClientAddress(), version(),
+      connection()->supported_versions(), use_stateless_rejects_in_crypto_config,
+      server_designated_connection_id, connection()->clock(),
+      connection()->random_generator(), compressed_certs_cache_,
       crypto_negotiated_params_, signed_config_,
       QuicCryptoStream::CryptoMessageFramingOverhead(version()),
       chlo_packet_size_, std::move(done_cb));
@@ -477,11 +476,11 @@ QuicConnectionId QuicCryptoServerStream::GenerateConnectionIdForReject(
     return 0;
   }
   return helper_->GenerateConnectionIdForReject(
-      session()->connection()->connection_id());
+      connection()->connection_id());
 }
 
 const QuicSocketAddress QuicCryptoServerStream::GetClientAddress() {
-  return session()->connection()->peer_address();
+  return connection()->peer_address();
 }
 
 }  // namespace net

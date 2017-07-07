@@ -12,7 +12,9 @@
 namespace net {
 
 QuicConnectionManager::QuicConnectionManager(QuicConnection *connection)
-    : connections_(std::map<QuicSubflowId, QuicConnection*>()),
+    : goaway_sent_(false),
+      goaway_received_(false),
+      connections_(std::map<QuicSubflowId, QuicConnection*>()),
       next_outgoing_subflow_id_(connection->perspective() == Perspective::IS_SERVER ? 2 : 3),
       packet_handler_(nullptr),
       current_subflow_id_(kInitialSubflowId) {
@@ -40,6 +42,66 @@ QuicConnectionManager::~QuicConnectionManager() {
     delete packet_handler_;
   }
 }
+
+void QuicConnectionManager::CloseConnection(
+    QuicErrorCode error,
+    const std::string& details,
+    ConnectionCloseBehavior connection_close_behavior) {
+  CurrentConnection()->CloseConnection(error,details,connection_close_behavior);
+}
+
+bool QuicConnectionManager::HasQueuedData() {
+  bool hasQueuedData = false;
+  for(auto it = connections_.begin(); it != connections_.end(); ++it) {
+    if(it->second->HasQueuedData()) {
+      hasQueuedData = true;
+    }
+  }
+  return hasQueuedData;
+}
+
+
+void QuicConnectionManager::SetNumOpenStreams(size_t num_streams) {
+  for(auto it = connections_.begin(); it != connections_.end(); ++it) {
+    it->second->SetNumOpenStreams(num_streams);
+  }
+}
+
+QuicConsumedData QuicConnectionManager::SendStreamData(
+    QuicStreamId id,
+    QuicIOVector iov,
+    QuicStreamOffset offset,
+    StreamSendingState state,
+    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
+  return CurrentConnection()->SendStreamData(id,iov,offset,state,ack_listener);
+}
+
+
+void QuicConnectionManager::SendRstStream(QuicStreamId id,
+                                   QuicRstStreamErrorCode error,
+                                   QuicStreamOffset bytes_written) {
+  CurrentConnection()->SendRstStream(id,error,bytes_written);
+}
+
+void QuicConnectionManager::SendBlocked(QuicStreamId id) {
+  CurrentConnection()->SendBlocked(id);
+}
+
+void QuicConnectionManager::SendWindowUpdate(QuicStreamId id,
+                                      QuicStreamOffset byte_offset) {
+  CurrentConnection()->SendWindowUpdate(id,byte_offset);
+}
+
+void QuicConnectionManager::SendGoAway(QuicErrorCode error,
+                                QuicStreamId last_good_stream_id,
+                                const std::string& reason) {
+  if (goaway_sent_) {
+    return;
+  }
+  goaway_sent_ = true;
+  CurrentConnection()->SendGoAway(error,last_good_stream_id,reason);
+}
+
 
 void QuicConnectionManager::TryAddingSubflow(QuicSubflowDescriptor descriptor) {
   // Check if the initial connection already finished its handshake messages
@@ -240,6 +302,7 @@ void QuicConnectionManager::OnRstStream(const QuicSubflowId& subflowId, const Qu
   if(visitor_) visitor_->OnRstStream(frame);
 }
 void QuicConnectionManager::OnGoAway(const QuicSubflowId& subflowId, const QuicGoAwayFrame& frame) {
+  goaway_received_ = true;
   if(visitor_) visitor_->OnGoAway(frame);
 }
 void QuicConnectionManager::OnConnectionClosed(const QuicSubflowId& subflowId, QuicErrorCode error,
@@ -263,7 +326,7 @@ void QuicConnectionManager::OnCanWrite(const QuicSubflowId& subflowId) {
   if(visitor_) visitor_->OnCanWrite(connections_[subflowId]);
 }
 void QuicConnectionManager::OnCongestionWindowChange(const QuicSubflowId& subflowId, QuicTime now) {
-  if(visitor_) visitor_->OnCongestionWindowChange(now);
+  if(visitor_) visitor_->OnCongestionWindowChange(connections_[subflowId], now);
 }
 void QuicConnectionManager::OnConnectionMigration(const QuicSubflowId& subflowId, PeerAddressChangeType type) {
   if(visitor_) visitor_->OnConnectionMigration(type);
@@ -290,7 +353,7 @@ bool QuicConnectionManager::HasOpenDynamicStreams(const QuicSubflowId& subflowId
   if(visitor_) return visitor_->HasOpenDynamicStreams();
   return false;
 }
-void QuicConnectionManager::OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame) {
+void QuicConnectionManager::OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame, const QuicTime& arrival_time_of_packet) {
   auto it = connections_.find(frame.subflow_id);
   if(it != connections_.end()) {
     QuicConnection *connection = it->second;
@@ -311,6 +374,9 @@ void QuicConnectionManager::OnAckFrame(const QuicSubflowId& subflowId, const Qui
   } else {
     //TODO error handling
   }
+
+  // Forward the ack frame to the corresponding connection.
+  connections_[frame.subflow_id]->HandleIncomingAckFrame(frame,arrival_time_of_packet);
 }
 void QuicConnectionManager::OnSubflowCloseFrame(const QuicSubflowId& subflowId, const QuicSubflowCloseFrame& frame) {
   auto it = connections_.find(frame.subflow_id);
@@ -320,6 +386,11 @@ void QuicConnectionManager::OnSubflowCloseFrame(const QuicSubflowId& subflowId, 
   } else {
     //TODO error handling
   }
+}
+
+void QuicConnectionManager::OnRetransmission(const QuicTransmissionInfo& transmission_info) {
+  // add frames to some connection
+
 }
 
 

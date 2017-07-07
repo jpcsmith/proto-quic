@@ -196,7 +196,7 @@ QuicChromiumClientSession::Handle::Handle(
       error_(OK),
       port_migration_detected_(false),
       server_id_(session_->server_id()),
-      quic_version_(session->connection()->version()) {
+      quic_version_(session->AnyConnection()->version()) {
   DCHECK(session_);
   session_->AddHandle(this);
 }
@@ -261,7 +261,7 @@ QuicVersion QuicChromiumClientSession::Handle::GetQuicVersion() const {
   if (!session_)
     return quic_version_;
 
-  return session_->connection()->version();
+  return session_->AnyConnection()->version();
 }
 
 void QuicChromiumClientSession::Handle::ResetPromised(
@@ -278,7 +278,7 @@ QuicChromiumClientSession::Handle::CreatePacketBundler(
     return nullptr;
 
   return base::MakeUnique<QuicConnection::ScopedPacketBundler>(
-      session_->connection(), bundling_mode);
+      session_->InitialConnection(), bundling_mode);
 }
 
 bool QuicChromiumClientSession::Handle::SharesSameSession(
@@ -574,13 +574,13 @@ QuicChromiumClientSession::~QuicChromiumClientSession() {
     CloseAllHandles(ERR_UNEXPECTED);
     CancelAllRequests(ERR_UNEXPECTED);
 
-    connection()->set_debug_visitor(nullptr);
+    InitialConnection()->set_debug_visitor(nullptr);
   }
 
-  if (connection()->connected()) {
+  if (connected()) {
     // Ensure that the connection is closed by the time the session is
     // destroyed.
-    connection()->CloseConnection(QUIC_INTERNAL_ERROR, "session torn down",
+    CloseConnection(QUIC_INTERNAL_ERROR, "session torn down",
                                   ConnectionCloseBehavior::SILENT_CLOSE);
   }
 
@@ -625,18 +625,18 @@ QuicChromiumClientSession::~QuicChromiumClientSession() {
     }
   }
 
-  const QuicConnectionStats stats = connection()->GetStats();
+  const QuicConnectionStats stats = InitialConnection()->GetStats();
 
   // The MTU used by QUIC is limited to a fairly small set of predefined values
   // (initial values and MTU discovery values), but does not fare well when
   // bucketed.  Because of that, a sparse histogram is used here.
   UMA_HISTOGRAM_SPARSE_SLOWLY("Net.QuicSession.ClientSideMtu",
-                              connection()->max_packet_length());
+                              InitialConnection()->max_packet_length());
   UMA_HISTOGRAM_SPARSE_SLOWLY("Net.QuicSession.ServerSideMtu",
                               stats.max_received_packet_size);
 
   UMA_HISTOGRAM_COUNTS("Net.QuicSession.MtuProbesSent",
-                       connection()->mtu_probe_count());
+                              InitialConnection()->mtu_probe_count());
 
   if (stats.packets_sent >= 100) {
     // Used to monitor for regressions that effect large uploads.
@@ -697,7 +697,7 @@ void QuicChromiumClientSession::OnStreamFrame(const QuicStreamFrame& frame) {
 void QuicChromiumClientSession::AddHandle(Handle* handle) {
   if (going_away_) {
     RecordUnexpectedObservers(ADD_OBSERVER);
-    handle->OnSessionClosed(connection()->version(), ERR_UNEXPECTED,
+    handle->OnSessionClosed(AnyConnection()->version(), ERR_UNEXPECTED,
                             port_migration_detected_,
 
                             GetConnectTiming());
@@ -715,7 +715,7 @@ void QuicChromiumClientSession::RemoveHandle(Handle* handle) {
 
 int QuicChromiumClientSession::WaitForHandshakeConfirmation(
     const CompletionCallback& callback) {
-  if (!connection()->connected())
+  if (!connected())
     return ERR_CONNECTION_CLOSED;
 
   if (IsCryptoHandshakeConfirmed())
@@ -731,7 +731,7 @@ int QuicChromiumClientSession::TryCreateStream(StreamRequest* request) {
     return ERR_CONNECTION_CLOSED;
   }
 
-  if (!connection()->connected()) {
+  if (!connected()) {
     DVLOG(1) << "Already closed.";
     return ERR_CONNECTION_CLOSED;
   }
@@ -798,7 +798,7 @@ QuicChromiumClientSession::CreateOutgoingDynamicStream(SpdyPriority priority) {
 
 QuicChromiumClientStream*
 QuicChromiumClientSession::CreateOutgoingReliableStreamImpl() {
-  DCHECK(connection()->connected());
+  DCHECK(connected());
   QuicChromiumClientStream* stream =
       new QuicChromiumClientStream(GetNextOutgoingStreamId(), this, net_log_);
   ActivateStream(base::WrapUnique(stream));
@@ -960,7 +960,7 @@ QuicStreamId QuicChromiumClientSession::GetStreamIdForPush(
 
 bool QuicChromiumClientSession::CanPool(const std::string& hostname,
                                         PrivacyMode privacy_mode) const {
-  DCHECK(connection()->connected());
+  DCHECK(connected());
   if (privacy_mode != server_id_.privacy_mode()) {
     // Privacy mode must always match.
     return false;
@@ -977,7 +977,7 @@ bool QuicChromiumClientSession::CanPool(const std::string& hostname,
 
 bool QuicChromiumClientSession::ShouldCreateIncomingDynamicStream(
     QuicStreamId id) {
-  if (!connection()->connected()) {
+  if (!connected()) {
     LOG(DFATAL) << "ShouldCreateIncomingDynamicStream called when disconnected";
     return false;
   }
@@ -991,7 +991,7 @@ bool QuicChromiumClientSession::ShouldCreateIncomingDynamicStream(
   }
   if (id % 2 != 0) {
     LOG(WARNING) << "Received invalid push stream id " << id;
-    connection()->CloseConnection(
+    CloseConnection(
         QUIC_INVALID_STREAM_ID, "Server created odd numbered stream",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return false;
@@ -1009,7 +1009,7 @@ QuicChromiumClientSession::CreateIncomingDynamicStream(QuicStreamId id) {
 
 QuicChromiumClientStream*
 QuicChromiumClientSession::CreateIncomingReliableStreamImpl(QuicStreamId id) {
-  DCHECK(connection()->connected());
+  DCHECK(connected());
   QuicChromiumClientStream* stream =
       new QuicChromiumClientStream(id, this, net_log_);
   stream->CloseWriteSide();
@@ -1049,7 +1049,7 @@ void QuicChromiumClientSession::SendRstStream(QuicStreamId id,
 void QuicChromiumClientSession::OnClosedStream() {
   if (GetNumOpenOutgoingStreams() < max_open_outgoing_streams() &&
       !stream_requests_.empty() && crypto_stream_->encryption_established() &&
-      !goaway_received() && !going_away_ && connection()->connected()) {
+      !goaway_received() && !going_away_ && connected()) {
     StreamRequest* request = stream_requests_.front();
     // TODO(ckrasic) - analyze data and then add logic to mark QUIC
     // broken if wait times are excessive.
@@ -1064,8 +1064,8 @@ void QuicChromiumClientSession::OnClosedStream() {
   }
 }
 
-void QuicChromiumClientSession::OnConfigNegotiated() {
-  QuicClientSessionBase::OnConfigNegotiated();
+void QuicChromiumClientSession::OnConfigNegotiated(QuicConnection *connection) {
+  QuicClientSessionBase::OnConfigNegotiated(connection);
   if (!stream_factory_ || !config()->HasReceivedAlternateServerAddress())
     return;
 
@@ -1094,7 +1094,7 @@ void QuicChromiumClientSession::OnConfigNegotiated() {
   stream_factory_->MigrateSessionToNewPeerAddress(this, new_address, net_log_);
 }
 
-void QuicChromiumClientSession::OnCryptoHandshakeEvent(
+void QuicChromiumClientSession::OnCryptoHandshakeEvent(QuicConnection* connection,
     CryptoHandshakeEvent event) {
   if (!callback_.is_null() &&
       (!require_confirmation_ || event == HANDSHAKE_CONFIRMED ||
@@ -1130,7 +1130,7 @@ void QuicChromiumClientSession::OnCryptoHandshakeEvent(
 
     NotifyRequestsOfConfirmation(OK);
   }
-  QuicSpdySession::OnCryptoHandshakeEvent(event);
+  QuicSpdySession::OnCryptoHandshakeEvent(connection, event);
 }
 
 void QuicChromiumClientSession::OnCryptoHandshakeMessageSent(
@@ -1167,7 +1167,7 @@ void QuicChromiumClientSession::OnConnectionClosed(
     QuicErrorCode error,
     const std::string& error_details,
     ConnectionCloseSource source) {
-  DCHECK(!connection()->connected());
+  DCHECK(!connected());
   logger_->OnConnectionClosed(error, error_details, source);
   if (source == ConnectionCloseSource::FROM_PEER) {
     if (IsCryptoHandshakeConfirmed()) {
@@ -1207,16 +1207,16 @@ void QuicChromiumClientSession::OnConnectionClosed(
       if (GetNumOpenOutgoingStreams() > 0) {
         UMA_HISTOGRAM_BOOLEAN(
             "Net.QuicSession.TimedOutWithOpenStreams.HasUnackedPackets",
-            connection()->sent_packet_manager().HasUnackedPackets());
+            InitialConnection()->sent_packet_manager().HasUnackedPackets());
         UMA_HISTOGRAM_COUNTS(
             "Net.QuicSession.TimedOutWithOpenStreams.ConsecutiveRTOCount",
-            connection()->sent_packet_manager().GetConsecutiveRtoCount());
+            InitialConnection()->sent_packet_manager().GetConsecutiveRtoCount());
         UMA_HISTOGRAM_COUNTS(
             "Net.QuicSession.TimedOutWithOpenStreams.ConsecutiveTLPCount",
-            connection()->sent_packet_manager().GetConsecutiveTlpCount());
+            InitialConnection()->sent_packet_manager().GetConsecutiveTlpCount());
         UMA_HISTOGRAM_SPARSE_SLOWLY(
             "Net.QuicSession.TimedOutWithOpenStreams.LocalPort",
-            connection()->self_address().port());
+            InitialConnection()->self_address().port());
       }
     } else {
       UMA_HISTOGRAM_COUNTS(
@@ -1242,7 +1242,7 @@ void QuicChromiumClientSession::OnConnectionClosed(
   } else {
     if (error == QUIC_PUBLIC_RESET) {
       RecordHandshakeFailureReason(HANDSHAKE_FAILURE_PUBLIC_RESET);
-    } else if (connection()->GetStats().packets_received == 0) {
+    } else if (InitialConnection()->GetStats().packets_received == 0) {
       RecordHandshakeFailureReason(HANDSHAKE_FAILURE_BLACK_HOLE);
       UMA_HISTOGRAM_SPARSE_SLOWLY(
           "Net.QuicSession.ConnectionClose.HandshakeFailureBlackHole.QuicError",
@@ -1256,7 +1256,7 @@ void QuicChromiumClientSession::OnConnectionClosed(
   }
 
   UMA_HISTOGRAM_SPARSE_SLOWLY("Net.QuicSession.QuicVersion",
-                              connection()->version());
+                              AnyConnection()->version());
   NotifyFactoryOfSessionGoingAway();
   QuicSession::OnConnectionClosed(error, error_details, source);
 
@@ -1330,7 +1330,7 @@ void QuicChromiumClientSession::MigrateSessionOnWriteError() {
 
   // Close the connection if migration failed. Do not cause a
   // connection close packet to be sent since socket may be borked.
-  connection()->CloseConnection(QUIC_PACKET_WRITE_ERROR,
+  CloseConnection(QUIC_PACKET_WRITE_ERROR,
                                 "Write and subsequent migration failed",
                                 ConnectionCloseBehavior::SILENT_CLOSE);
 }
@@ -1339,7 +1339,7 @@ void QuicChromiumClientSession::OnNoNewNetwork() {
   migration_pending_ = true;
 
   // Block the packet writer to avoid any writes while migration is in progress.
-  static_cast<QuicChromiumPacketWriter*>(connection()->writer())
+  static_cast<QuicChromiumPacketWriter*>(InitialConnection()->writer())
       ->set_write_blocked(true);
 
   // Post a task to maybe close the session if the alarm fires.
@@ -1352,13 +1352,13 @@ void QuicChromiumClientSession::OnNoNewNetwork() {
 void QuicChromiumClientSession::WriteToNewSocket() {
   // Prevent any pending migration from executing.
   migration_pending_ = false;
-  static_cast<QuicChromiumPacketWriter*>(connection()->writer())
+  static_cast<QuicChromiumPacketWriter*>(InitialConnection()->writer())
       ->set_write_blocked(false);
   if (packet_ == nullptr) {
     // Unblock the connection before sending a PING packet, since it
     // may have been blocked before the migration started.
-    connection()->OnCanWrite();
-    connection()->SendPing();
+    InitialConnection()->OnCanWrite();
+    InitialConnection()->SendPing();
     return;
   }
 
@@ -1372,7 +1372,7 @@ void QuicChromiumClientSession::WriteToNewSocket() {
   // write below completes asynchronously, but a synchronous competion
   // must be propagated back to the connection here.
   WriteResult result =
-      static_cast<QuicChromiumPacketWriter*>(connection()->writer())
+      static_cast<QuicChromiumPacketWriter*>(InitialConnection()->writer())
           ->WritePacketToSocket(packet);
   if (result.error_code == ERR_IO_PENDING)
     return;
@@ -1380,7 +1380,7 @@ void QuicChromiumClientSession::WriteToNewSocket() {
   // All write errors should be mapped into ERR_IO_PENDING by
   // HandleWriteError.
   DCHECK_LT(0, result.error_code);
-  connection()->OnCanWrite();
+  InitialConnection()->OnCanWrite();
 }
 
 void QuicChromiumClientSession::OnMigrationTimeout(size_t num_sockets) {
@@ -1417,11 +1417,11 @@ void QuicChromiumClientSession::OnWriteError(int error_code) {
     UMA_HISTOGRAM_SPARSE_SLOWLY("Net.QuicSession.WriteError.HandshakeConfirmed",
                                 -error_code);
   }
-  connection()->OnWriteError(error_code);
+  InitialConnection()->OnWriteError(error_code);
 }
 
 void QuicChromiumClientSession::OnWriteUnblocked() {
-  connection()->OnCanWrite();
+  InitialConnection()->OnCanWrite();
 }
 
 void QuicChromiumClientSession::OnPathDegrading() {
@@ -1488,10 +1488,10 @@ void QuicChromiumClientSession::CloseSessionOnError(int net_error,
   net_log_.AddEvent(NetLogEventType::QUIC_SESSION_CLOSE_ON_ERROR,
                     NetLog::IntCallback("net_error", net_error));
 
-  if (connection()->connected())
-    connection()->CloseConnection(quic_error, "net error",
+  if (connected())
+    CloseConnection(quic_error, "net error",
                                   ConnectionCloseBehavior::SILENT_CLOSE);
-  DCHECK(!connection()->connected());
+  DCHECK(!connected());
 
   NotifyFactoryOfSessionClosed();
 }
@@ -1509,7 +1509,7 @@ void QuicChromiumClientSession::CloseAllHandles(int net_error) {
   while (!handles_.empty()) {
     Handle* handle = *handles_.begin();
     handles_.erase(handle);
-    handle->OnSessionClosed(connection()->version(), net_error,
+    handle->OnSessionClosed(AnyConnection()->version(), net_error,
                             port_migration_detected_, GetConnectTiming());
   }
 }
@@ -1536,7 +1536,7 @@ void QuicChromiumClientSession::NotifyRequestsOfConfirmation(int net_error) {
 std::unique_ptr<base::Value> QuicChromiumClientSession::GetInfoAsValue(
     const std::set<HostPortPair>& aliases) {
   std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
-  dict->SetString("version", QuicVersionToString(connection()->version()));
+  dict->SetString("version", QuicVersionToString(AnyConnection()->version()));
   dict->SetInteger("open_streams", GetNumOpenOutgoingStreams());
   std::unique_ptr<base::ListValue> stream_list(new base::ListValue());
   for (DynamicStreamMap::const_iterator it = dynamic_streams().begin();
@@ -1548,8 +1548,8 @@ std::unique_ptr<base::Value> QuicChromiumClientSession::GetInfoAsValue(
   dict->SetInteger("total_streams", num_total_streams_);
   dict->SetString("peer_address", peer_address().ToString());
   dict->SetString("connection_id", base::Uint64ToString(connection_id()));
-  dict->SetBoolean("connected", connection()->connected());
-  const QuicConnectionStats& stats = connection()->GetStats();
+  dict->SetBoolean("connected", connected());
+  const QuicConnectionStats& stats = InitialConnection()->GetStats();
   dict->SetInteger("packets_sent", stats.packets_sent);
   dict->SetInteger("packets_received", stats.packets_received);
   dict->SetInteger("packets_lost", stats.packets_lost);
@@ -1582,7 +1582,7 @@ void QuicChromiumClientSession::OnReadError(
   }
   DVLOG(1) << "Closing session on read error: " << result;
   UMA_HISTOGRAM_SPARSE_SLOWLY("Net.QuicSession.ReadError", -result);
-  connection()->CloseConnection(QUIC_PACKET_READ_ERROR, ErrorToString(result),
+  CloseConnection(QUIC_PACKET_READ_ERROR, ErrorToString(result),
                                 ConnectionCloseBehavior::SILENT_CLOSE);
 }
 
@@ -1591,7 +1591,7 @@ bool QuicChromiumClientSession::OnPacket(
     const QuicSocketAddress& local_address,
     const QuicSocketAddress& peer_address) {
   ProcessUdpPacket(local_address, peer_address, packet);
-  if (!connection()->connected()) {
+  if (!connected()) {
     NotifyFactoryOfSessionClosedLater();
     return false;
   }
@@ -1613,7 +1613,7 @@ void QuicChromiumClientSession::NotifyFactoryOfSessionClosedLater() {
 
   going_away_ = true;
   DCHECK_EQ(0u, GetNumActiveStreams());
-  DCHECK(!connection()->connected());
+  DCHECK(!connected());
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&QuicChromiumClientSession::NotifyFactoryOfSessionClosed,
@@ -1649,7 +1649,7 @@ bool QuicChromiumClientSession::MigrateToSocket(
   // Block the writer to prevent is being used until WriteToNewSocket
   // completes.
   writer->set_write_blocked(true);
-  connection()->SetQuicPacketWriter(writer.release(), /*owns_writer=*/true);
+  InitialConnection()->SetQuicPacketWriter(writer.release(), /*owns_writer=*/true);
 
   // Post task to write the pending packet or a PING packet to the new
   // socket. This avoids reentrancy issues if there is a write error
@@ -1752,7 +1752,7 @@ QuicChromiumClientSession::GetConnectTiming() {
 }
 
 QuicVersion QuicChromiumClientSession::GetQuicVersion() const {
-  return connection()->version();
+  return AnyConnection()->version();
 }
 
 size_t QuicChromiumClientSession::EstimateMemoryUsage() const {

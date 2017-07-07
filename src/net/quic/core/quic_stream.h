@@ -174,9 +174,6 @@ class QUIC_EXPORT_PRIVATE QuicStream {
   // stop sending stream-level flow-control updates when this end sends FIN.
   virtual void StopReading();
 
-  // Get peer IP of the lastest packet which connection is dealing/delt with.
-  virtual const QuicSocketAddress& PeerAddressOfLatestPacket() const;
-
   // Sends as much of 'data' to the connection as the connection will consume,
   // and then buffers any remaining data in queued_data_.
   // If fin is true: if it is immediately passed on to the session,

@@ -316,7 +316,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   void SendRstStream(QuicStreamId id,
                      QuicRstStreamErrorCode error,
                      QuicStreamOffset bytes_written) override;
-  void OnCryptoHandshakeEvent(CryptoHandshakeEvent event) override;
+  void OnCryptoHandshakeEvent(QuicConnection* connection, CryptoHandshakeEvent event) override;
   void OnCryptoHandshakeMessageSent(
       const CryptoHandshakeMessage& message) override;
   void OnCryptoHandshakeMessageReceived(
@@ -325,7 +325,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   void OnRstStream(const QuicRstStreamFrame& frame) override;
 
   // QuicClientSessionBase methods:
-  void OnConfigNegotiated() override;
+  void OnConfigNegotiated(QuicConnection *connection) override;
   void OnProofValid(const QuicCryptoClientConfig::CachedState& cached) override;
   void OnProofVerifyDetailsAvailable(
       const ProofVerifyDetails& verify_details) override;

@@ -463,7 +463,7 @@ void QuicStreamFactory::Job::OnIOComplete(int rv) {
 void QuicStreamFactory::Job::Cancel() {
   callback_.Reset();
   if (session_)
-    session_->connection()->CloseConnection(
+    session_->CloseConnection(
         QUIC_CONNECTION_CANCELLED, "New job canceled.",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
 }
@@ -518,17 +518,17 @@ int QuicStreamFactory::Job::DoConnect() {
     return rv;
   }
 
-  if (!session_->connection()->connected())
+  if (!session_->connected())
     return ERR_CONNECTION_CLOSED;
 
   session_->StartReading();
-  if (!session_->connection()->connected())
+  if (!session_->connected())
     return ERR_QUIC_PROTOCOL_ERROR;
 
   rv = session_->CryptoConnect(
       base::Bind(&QuicStreamFactory::Job::OnIOComplete, GetWeakPtr()));
 
-  if (!session_->connection()->connected() &&
+  if (!session_->connected() &&
       session_->error() == QUIC_PROOF_INVALID) {
     return ERR_QUIC_HANDSHAKE_FAILED;
   }
@@ -558,9 +558,9 @@ int QuicStreamFactory::Job::DoConnectComplete(int rv) {
   // There may well now be an active session for this IP.  If so, use the
   // existing session instead.
   AddressList address(
-      session_->connection()->peer_address().impl().socket_address());
+      session_->InitialConnection()->peer_address().impl().socket_address());
   if (factory_->OnResolution(key_, address)) {
-    session_->connection()->CloseConnection(
+    session_->CloseConnection(
         QUIC_CONNECTION_IP_POOLED, "An active session exists for the given IP.",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     session_ = nullptr;
@@ -1302,7 +1302,7 @@ MigrationResult QuicStreamFactory::MigrateSessionToNewNetwork(
     bool close_session_on_error,
     const NetLogWithSource& net_log) {
   return MigrateSessionInner(
-      session, session->connection()->peer_address().impl().socket_address(),
+      session, session->InitialConnection()->peer_address().impl().socket_address(),
       network, close_session_on_error, net_log);
 }
 
@@ -1527,7 +1527,7 @@ int QuicStreamFactory::CreateSession(
 
   (*session)->Initialize();
   bool closed_during_initialize = !base::ContainsKey(all_sessions_, *session) ||
-                                  !(*session)->connection()->connected();
+                                  !(*session)->InitialConnection()->connected();
   UMA_HISTOGRAM_BOOLEAN("Net.QuicSession.ClosedDuringInitializeSession",
                         closed_during_initialize);
   if (closed_during_initialize) {
@@ -1546,7 +1546,7 @@ void QuicStreamFactory::ActivateSession(const QuicSessionKey& key,
   active_sessions_[server_id] = session;
   session_aliases_[session].insert(key);
   const IPEndPoint peer_address =
-      session->connection()->peer_address().impl().socket_address();
+      session->InitialConnection()->peer_address().impl().socket_address();
   DCHECK(!base::ContainsKey(ip_aliases_[peer_address], session));
   ip_aliases_[peer_address].insert(session);
   DCHECK(!base::ContainsKey(session_peer_ip_, session));
@@ -1664,7 +1664,7 @@ void QuicStreamFactory::ProcessGoingAwaySession(
   if (!http_server_properties_)
     return;
 
-  const QuicConnectionStats& stats = session->connection()->GetStats();
+  const QuicConnectionStats& stats = session->InitialConnection()->GetStats();
   const AlternativeService alternative_service(kProtoQUIC,
                                                server_id.host_port_pair());
   url::SchemeHostPort server("https", server_id.host_port_pair().host(),
