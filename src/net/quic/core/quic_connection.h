@@ -170,6 +170,8 @@ class QUIC_EXPORT_PRIVATE QuicConnectionVisitorInterface {
   virtual void OnSubflowCloseFrame(const QuicSubflowId& subflowId, const QuicSubflowCloseFrame& frame) = 0;
 
   virtual void OnRetransmission(const QuicTransmissionInfo& transmission_info) = 0;
+
+  virtual QuicFrames GetUpdatedAckFrames(const QuicSubflowId& subflow_id, const QuicTime& now) = 0;
 };
 
 // Interface which gets callbacks from the QuicConnection at interesting
@@ -386,7 +388,7 @@ class QUIC_EXPORT_PRIVATE QuicConnection
 
   void HandleIncomingAckFrame(
       const QuicAckFrame& frame,
-      const QuicTime& arrival_time_of_packet) = 0;
+      const QuicTime& arrival_time_of_packet);
 
   // Adds a NEW_SUBFLOW frame as the first frame in every sent packet.
   void PrependNewSubflowFrame(QuicSubflowId subflowId);

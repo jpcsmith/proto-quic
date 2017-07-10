@@ -387,10 +387,22 @@ void QuicConnectionManager::OnSubflowCloseFrame(const QuicSubflowId& subflowId, 
     //TODO error handling
   }
 }
+QuicFrames QuicConnectionManager::GetUpdatedAckFrames(const QuicSubflowId& subflow_id) {
+  QuicTime now = AnyConnection()->clock()->ApproximateNow();
+  QuicFrames frames;
+  for(auto it = connections_.begin(); it != connections_.end(); ++it) {
+    frames.push_back(it->second->GetUpdatedAckFrame(now));
+  }
+  return frames;
+}
 
 void QuicConnectionManager::OnRetransmission(const QuicTransmissionInfo& transmission_info) {
+  QuicConnection* connection = CurrentConnection();
+  // bundled_packet_handler?
+  
   // add frames to some connection
-
+  for(auto it : transmission_info->retransmittable_frames) {
+    connection->
 }
 
 

@@ -1156,7 +1156,11 @@ void QuicConnection::ClearLastFrames() {
 
 const QuicFrames QuicConnection::GetUpdatedAckFrames() {
   //TODO(cyrill) call visitor and collect all updated ack frames.
-  return received_packet_manager_.GetUpdatedAckFrame(clock_->ApproximateNow());
+  if(visitor_) {
+    return visitor_->GetUpdatedAckFrames(subflow_id, clock_ApproximateNow());
+  }
+  return nullptr;
+  //received_packet_manager_.GetUpdatedAckFrame(clock_->ApproximateNow());
 }
 
 void QuicConnection::PopulateStopWaitingFrame(
