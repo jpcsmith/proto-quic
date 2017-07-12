@@ -105,6 +105,10 @@ enum QuicErrorCode {
   QUIC_INVALID_PATH_CLOSE_DATA = 78,
   // ACK frame data is malformed.
   QUIC_INVALID_ACK_DATA = 9,
+  // ACK frame data is malformed.
+  QUIC_INVALID_NEW_SUBFLOW_DATA = 98,
+  // ACK frame data is malformed.
+  QUIC_INVALID_SUBFLOW_CLOSE_DATA = 99,
 
   // Version negotiation packet is malformed.
   QUIC_INVALID_VERSION_NEGOTIATION_PACKET = 10,
@@ -274,7 +278,7 @@ enum QuicErrorCode {
   QUIC_TOO_MANY_SESSIONS_ON_SERVER = 96,
 
   // No error. Used as bound while iterating.
-  QUIC_LAST_ERROR = 98,
+  QUIC_LAST_ERROR = 100,
 };
 // QuicErrorCodes is encoded as a single octet on-the-wire.
 static_assert(static_cast<int>(QUIC_LAST_ERROR) <=

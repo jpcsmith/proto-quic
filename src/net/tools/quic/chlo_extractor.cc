@@ -46,6 +46,8 @@ class ChloFramerVisitor : public QuicFramerVisitorInterface,
   bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
   bool OnBlockedFrame(const QuicBlockedFrame& frame) override;
   bool OnPaddingFrame(const QuicPaddingFrame& frame) override;
+  bool OnNewSubflowFrame(const QuicNewSubflowFrame& frame) override;
+  bool OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override;
   void OnPacketComplete() override {}
 
   // CryptoFramerVisitorInterface implementation.
@@ -136,6 +138,14 @@ bool ChloFramerVisitor::OnBlockedFrame(const QuicBlockedFrame& frame) {
 }
 
 bool ChloFramerVisitor::OnPaddingFrame(const QuicPaddingFrame& frame) {
+  return true;
+}
+
+bool ChloFramerVisitor::OnNewSubflowFrame(const QuicNewSubflowFrame& frame) {
+  return true;
+}
+
+bool ChloFramerVisitor::OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) {
   return true;
 }
 

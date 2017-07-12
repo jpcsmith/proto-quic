@@ -43,6 +43,12 @@ QuicFrame::QuicFrame(QuicWindowUpdateFrame* frame)
 QuicFrame::QuicFrame(QuicBlockedFrame* frame)
     : type(BLOCKED_FRAME), blocked_frame(frame) {}
 
+QuicFrame::QuicFrame(QuicNewSubflowFrame* frame)
+    : type(NEW_SUBFLOW_FRAME), new_subflow_frame(frame) {}
+
+QuicFrame::QuicFrame(QuicSubflowCloseFrame* frame)
+    : type(SUBFLOW_CLOSE_FRAME), subflow_close_frame(frame) {}
+
 void DeleteFrames(QuicFrames* frames) {
   for (QuicFrame& frame : *frames) {
     switch (frame.type) {
@@ -71,6 +77,12 @@ void DeleteFrames(QuicFrames* frames) {
         break;
       case BLOCKED_FRAME:
         delete frame.blocked_frame;
+        break;
+      case NEW_SUBFLOW_FRAME:
+        delete frame.new_subflow_frame;
+        break;
+      case SUBFLOW_CLOSE_FRAME:
+        delete frame.subflow_close_frame;
         break;
       case WINDOW_UPDATE_FRAME:
         delete frame.window_update_frame;
@@ -119,6 +131,14 @@ std::ostream& operator<<(std::ostream& os, const QuicFrame& frame) {
     }
     case BLOCKED_FRAME: {
       os << "type { BLOCKED_FRAME } " << *(frame.blocked_frame);
+      break;
+    }
+    case NEW_SUBFLOW_FRAME: {
+      os << "type { NEW_SUBFLOW_FRAME } " << *(frame.new_subflow_frame);
+      break;
+    }
+    case SUBFLOW_CLOSE_FRAME: {
+      os << "type { SUBFLOW_CLOSE_FRAME } " << *(frame.subflow_close_frame);
       break;
     }
     case STREAM_FRAME: {

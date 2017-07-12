@@ -34,6 +34,7 @@
 #include "net/quic/platform/api/quic_map_util.h"
 #include "net/quic/platform/api/quic_str_cat.h"
 #include "net/quic/platform/api/quic_text_utils.h"
+#include "net/quic/core/quic_framer.h"
 
 using std::string;
 
@@ -171,16 +172,19 @@ class MtuDiscoveryAlarmDelegate : public QuicAlarm::Delegate {
   (perspective_ == Perspective::IS_SERVER ? "Server: " : "Client: ")
 
 QuicConnection::QuicConnection(QuicConnectionId connection_id,
-                               QuicSocketAddress address,
+                               QuicSocketAddress self_address,
+                               QuicSocketAddress peer_address,
                                QuicConnectionHelperInterface* helper,
                                QuicAlarmFactory* alarm_factory,
                                QuicPacketWriter* writer,
                                bool owns_writer,
                                Perspective perspective,
-                               const QuicVersionVector& supported_versions)
-    : framer_(supported_versions,
-              helper->GetClock()->ApproximateNow(),
-              perspective),
+                               const QuicVersionVector& supported_versions,
+                               QuicFramer *framer,
+                               bool owns_framer,
+                               bool do_not_perform_handshake)
+    : framer_(framer),
+      owns_framer_(owns_framer),
       helper_(helper),
       alarm_factory_(alarm_factory),
       per_packet_options_(nullptr),
@@ -190,7 +194,8 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       clock_(helper->GetClock()),
       random_generator_(helper->GetRandomGenerator()),
       connection_id_(connection_id),
-      peer_address_(address),
+      self_address_(self_address),
+      peer_address_(peer_address),
       active_peer_migration_type_(NO_CHANGE),
       highest_packet_sent_before_peer_migration_(0),
       last_packet_decrypted_(false),
@@ -244,7 +249,7 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       visitor_(nullptr),
       debug_visitor_(nullptr),
       packet_generator_(connection_id_,
-                        &framer_,
+                        framer_,
                         random_generator_,
                         helper->GetBufferAllocator(),
                         this),
@@ -267,10 +272,11 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       goaway_received_(false),
       write_error_occured_(false),
       no_stop_waiting_frames_(false),
-      consecutive_num_packets_with_no_retransmittable_frames_(0) {
+      consecutive_num_packets_with_no_retransmittable_frames_(0),
+      subflow_state_(SUBFLOW_OPEN_INITIATED) {
   QUIC_DLOG(INFO) << ENDPOINT
                   << "Created connection with connection_id: " << connection_id;
-  framer_.set_visitor(this);
+  framer_->set_visitor(this);
   stats_.connection_creation_time = clock_->ApproximateNow();
   // TODO(ianswett): Supply the NetworkChangeVisitor as a constructor argument
   // and make it required non-null, because it's always used.
@@ -284,13 +290,117 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
     QUIC_FLAG_COUNT_N(quic_reloadable_flag_quic_no_stop_waiting_frames, 1, 2);
     received_packet_manager_.set_max_ack_ranges(255);
   }
+
+  // Create a connection for a subflow without exchanging handshake messages
+  // using a previously established crypto context.
+  if(do_not_perform_handshake)
+  {
+    sent_packet_manager_.SetHandshakeConfirmed();
+  }
+}
+
+QuicConnection::QuicConnection(QuicConnectionId connection_id,
+                               QuicSocketAddress address,
+                               QuicConnectionHelperInterface* helper,
+                               QuicAlarmFactory* alarm_factory,
+                               QuicPacketWriter* writer,
+                               bool owns_writer,
+                               Perspective perspective,
+                               const QuicVersionVector& supported_versions)
+    : QuicConnection(connection_id,
+        QuicSocketAddress(),
+        address,
+        helper,
+        alarm_factory,
+        writer,
+        owns_writer,
+        perspective,
+        supported_versions)
+{
+}
+
+QuicConnection::QuicConnection(QuicConnectionId connection_id,
+                               QuicSocketAddress self_address,
+                               QuicSocketAddress peer_address,
+                               QuicConnectionHelperInterface* helper,
+                               QuicAlarmFactory* alarm_factory,
+                               QuicPacketWriter* writer,
+                               bool owns_writer,
+                               Perspective perspective,
+                               const QuicVersionVector& supported_versions)
+    : QuicConnection(connection_id,
+        self_address,
+        peer_address,
+        helper,
+        alarm_factory,
+        writer,
+        owns_writer,
+        perspective,
+        supported_versions,
+        new QuicFramer(supported_versions, helper->GetClock()->ApproximateNow(), perspective),
+        /* owns_framer */ true,
+        /* do_not_perform_handshake */ false)
+{
 }
 
 QuicConnection::~QuicConnection() {
   if (owns_writer_) {
     delete writer_;
   }
+  if (owns_framer_) {
+    delete framer_;
+  }
   ClearQueuedPackets();
+}
+
+QuicConnection *QuicConnection::CloneToSubflow(
+    QuicSubflowDescriptor descriptor,
+    QuicPacketWriter *writer,
+    bool owns_writer,
+    QuicSubflowId subflowId) {
+  QuicFramer *framer = new QuicFramer(
+      supported_versions(),
+      helper_->GetClock()->ApproximateNow(),
+      perspective_,
+      framer_->CryptoContext(),
+      false,
+      framer_->version());
+
+  QuicConnection *connection = new QuicConnection(
+      connection_id_,
+      descriptor.Self(),
+      descriptor.Peer(),
+      helper_,
+      alarm_factory_,
+      writer,
+      owns_writer,
+      perspective_,
+      supported_versions(),
+      framer,
+      /* owns_framer */ true,
+      /* do_not_perform_handshake */ true);
+  connection->SetDefaultEncryptionLevel(encryption_level());
+
+  return connection;
+}
+
+void QuicConnection::PrependNewSubflowFrame(QuicSubflowId subflowId) {
+  QuicFrames frames;
+  QuicFrame frame(new QuicNewSubflowFrame(subflowId));
+  frames.push_back(frame);
+  packet_generator_.packet_creator().SetPrependedFrames(frames);
+}
+
+void QuicConnection::PrependSubflowCloseFrame(QuicSubflowId subflowId) {
+  QuicFrames frames;
+  QuicFrame frame(new QuicSubflowCloseFrame(subflowId));
+  frames.push_back(frame);
+  packet_generator_.packet_creator().SetPrependedFrames(frames);
+}
+
+void QuicConnection::RemovePrependedFrames() {
+  QuicFrames frames;
+  packet_generator_.packet_creator().SetPrependedFrames(frames);
 }
 
 void QuicConnection::ClearQueuedPackets() {
@@ -399,11 +509,11 @@ bool QuicConnection::SelectMutualVersion(
   // Try to find the highest mutual version by iterating over supported
   // versions, starting with the highest, and breaking out of the loop once we
   // find a matching version in the provided available_versions vector.
-  const QuicVersionVector& supported_versions = framer_.supported_versions();
+  const QuicVersionVector& supported_versions = framer_->supported_versions();
   for (size_t i = 0; i < supported_versions.size(); ++i) {
     const QuicVersion& version = supported_versions[i];
     if (QuicContainsValue(available_versions, version)) {
-      framer_.set_version(version);
+      framer_->set_version(version);
       return true;
     }
   }
@@ -458,7 +568,7 @@ bool QuicConnection::OnProtocolVersionMismatch(QuicVersion received_version) {
 
   switch (version_negotiation_state_) {
     case START_NEGOTIATION:
-      if (!framer_.IsSupportedVersion(received_version)) {
+      if (!framer_->IsSupportedVersion(received_version)) {
         SendVersionNegotiationPacket();
         version_negotiation_state_ = NEGOTIATION_IN_PROGRESS;
         return false;
@@ -466,7 +576,7 @@ bool QuicConnection::OnProtocolVersionMismatch(QuicVersion received_version) {
       break;
 
     case NEGOTIATION_IN_PROGRESS:
-      if (!framer_.IsSupportedVersion(received_version)) {
+      if (!framer_->IsSupportedVersion(received_version)) {
         SendVersionNegotiationPacket();
         return false;
       }
@@ -489,7 +599,7 @@ bool QuicConnection::OnProtocolVersionMismatch(QuicVersion received_version) {
   QUIC_DLOG(INFO) << ENDPOINT << "version negotiated " << received_version;
 
   // Store the new version.
-  framer_.set_version(received_version);
+  framer_->set_version(received_version);
 
   // TODO(satyamshekhar): Store the packet number of this packet and close the
   // connection if we ever received a packet with incorrect version and whose
@@ -535,7 +645,7 @@ void QuicConnection::OnVersionNegotiationPacket(
     CloseConnection(
         QUIC_INVALID_VERSION,
         QuicStrCat("No common version found. Supported versions: {",
-                   QuicVersionVectorToString(framer_.supported_versions()),
+                   QuicVersionVectorToString(framer_->supported_versions()),
                    "}, peer supported versions: {",
                    QuicVersionVectorToString(packet.versions), "}"),
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
@@ -917,6 +1027,21 @@ bool QuicConnection::OnBlockedFrame(const QuicBlockedFrame& frame) {
   return connected_;
 }
 
+bool QuicConnection::OnNewSubflowFrame(const QuicNewSubflowFrame& frame) {
+  DCHECK(connected_);
+  QUIC_DLOG(INFO) << ENDPOINT
+                  << "NEW_SUBFLOW_FRAME received for subflow: " << frame.subflow_id;
+  return connected_;
+}
+
+bool QuicConnection::OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) {
+  DCHECK(connected_);
+  QUIC_DLOG(INFO) << ENDPOINT
+                  << "SUBFLOW_CLOSE_FRAME received for subflow: " << frame.subflow_id;
+  visitor_->OnSubflowCloseFrame(frame);
+  return connected_;
+}
+
 void QuicConnection::OnPacketComplete() {
   // Don't do anything if this packet closed the connection.
   if (!connected_) {
@@ -1042,11 +1167,11 @@ void QuicConnection::SendVersionNegotiationPacket() {
     return;
   }
   QUIC_DLOG(INFO) << ENDPOINT << "Sending version negotiation packet: {"
-                  << QuicVersionVectorToString(framer_.supported_versions())
+                  << QuicVersionVectorToString(framer_->supported_versions())
                   << "}";
   std::unique_ptr<QuicEncryptedPacket> version_packet(
       packet_generator_.SerializeVersionNegotiationPacket(
-          framer_.supported_versions()));
+          framer_->supported_versions()));
   WriteResult result = writer_->WritePacket(
       version_packet->data(), version_packet->length(), self_address().host(),
       peer_address(), per_packet_options_);
@@ -1209,10 +1334,10 @@ void QuicConnection::ProcessUdpPacket(const QuicSocketAddress& self_address,
                 << time_of_last_received_packet_.ToDebuggingValue();
 
   ScopedRetransmissionScheduler alarm_delayer(this);
-  if (!framer_.ProcessPacket(packet)) {
+  if (!framer_->ProcessPacket(packet)) {
     // If we are unable to decrypt this packet, it might be
     // because the CHLO or SHLO packet was lost.
-    if (framer_.error() == QUIC_DECRYPTION_FAILURE) {
+    if (framer_->error() == QUIC_DECRYPTION_FAILURE) {
       if (encryption_level_ != ENCRYPTION_FORWARD_SECURE &&
           undecryptable_packets_.size() < max_undecryptable_packets_) {
         QueueUndecryptablePacket(packet);
@@ -1853,21 +1978,21 @@ void QuicConnection::SetDefaultEncryptionLevel(EncryptionLevel level) {
 
 void QuicConnection::SetDecrypter(EncryptionLevel level,
                                   QuicDecrypter* decrypter) {
-  framer_.SetDecrypter(level, decrypter);
+  framer_->SetDecrypter(level, decrypter);
 }
 
 void QuicConnection::SetAlternativeDecrypter(EncryptionLevel level,
                                              QuicDecrypter* decrypter,
                                              bool latch_once_used) {
-  framer_.SetAlternativeDecrypter(level, decrypter, latch_once_used);
+  framer_->SetAlternativeDecrypter(level, decrypter, latch_once_used);
 }
 
 const QuicDecrypter* QuicConnection::decrypter() const {
-  return framer_.decrypter();
+  return framer_->decrypter();
 }
 
 const QuicDecrypter* QuicConnection::alternative_decrypter() const {
-  return framer_.alternative_decrypter();
+  return framer_->alternative_decrypter();
 }
 
 void QuicConnection::QueueUndecryptablePacket(
@@ -1884,8 +2009,8 @@ void QuicConnection::MaybeProcessUndecryptablePackets() {
   while (connected_ && !undecryptable_packets_.empty()) {
     QUIC_DVLOG(1) << ENDPOINT << "Attempting to process undecryptable packet";
     QuicEncryptedPacket* packet = undecryptable_packets_.front().get();
-    if (!framer_.ProcessPacket(*packet) &&
-        framer_.error() == QUIC_DECRYPTION_FAILURE) {
+    if (!framer_->ProcessPacket(*packet) &&
+        framer_->error() == QUIC_DECRYPTION_FAILURE) {
       QUIC_DVLOG(1) << ENDPOINT << "Unable to process undecryptable packet...";
       break;
     }
@@ -1958,7 +2083,8 @@ void QuicConnection::SendConnectionClosePacket(QuicErrorCode error,
 void QuicConnection::TearDownLocalConnectionState(
     QuicErrorCode error,
     const string& error_details,
-    ConnectionCloseSource source) {
+    ConnectionCloseSource source,
+    bool notify_visitor) {
   if (!connected_) {
     QUIC_DLOG(INFO) << "Connection is already closed.";
     return;
@@ -1968,7 +2094,7 @@ void QuicConnection::TearDownLocalConnectionState(
   // TODO(rtenneti): crbug.com/546668. A temporary fix. Added a check for null
   // |visitor_| to fix crash bug. Delete |visitor_| check and histogram after
   // fix is merged.
-  if (visitor_ != nullptr) {
+  if (notify_visitor && visitor_ != nullptr) {
     visitor_->OnConnectionClosed(error, error_details, source);
   } else {
     UMA_HISTOGRAM_BOOLEAN("Net.QuicCloseConnection.NullVisitor", true);

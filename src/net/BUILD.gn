@@ -1212,6 +1212,10 @@ component("net") {
       "quic/core/frames/quic_ack_frame.h",
       "quic/core/frames/quic_blocked_frame.cc",
       "quic/core/frames/quic_blocked_frame.h",
+      "quic/core/frames/quic_new_subflow_frame.cc",
+      "quic/core/frames/quic_new_subflow_frame.h",
+      "quic/core/frames/quic_subflow_close_frame.cc",
+      "quic/core/frames/quic_subflow_close_frame.h",
       "quic/core/frames/quic_connection_close_frame.cc",
       "quic/core/frames/quic_connection_close_frame.h",
       "quic/core/frames/quic_frame.cc",
@@ -1255,6 +1259,8 @@ component("net") {
       "quic/core/quic_connection.cc",
       "quic/core/quic_connection.h",
       "quic/core/quic_connection_close_delegate_interface.h",
+      "quic/core/quic_connection_manager.cc",
+      "quic/core/quic_connection_manager.h",
       "quic/core/quic_connection_stats.cc",
       "quic/core/quic_connection_stats.h",
       "quic/core/quic_constants.cc",
@@ -1364,6 +1370,8 @@ component("net") {
       "quic/platform/api/quic_stack_trace.h",
       "quic/platform/api/quic_str_cat.h",
       "quic/platform/api/quic_string_piece.h",
+      "quic/platform/api/quic_subflow_descriptor.cc",
+      "quic/platform/api/quic_subflow_descriptor.h",
       "quic/platform/api/quic_text_utils.h",
       "quic/platform/api/quic_url.cc",
       "quic/platform/api/quic_url.h",
@@ -1397,6 +1405,8 @@ component("net") {
       "quic/platform/impl/quic_stack_trace_impl.h",
       "quic/platform/impl/quic_str_cat_impl.h",
       "quic/platform/impl/quic_string_piece_impl.h",
+      "quic/platform/impl/quic_subflow_descriptor_impl.cc",
+      "quic/platform/impl/quic_subflow_descriptor_impl.h",
       "quic/platform/impl/quic_text_utils_impl.h",
       "quic/platform/impl/quic_url_impl.cc",
       "quic/platform/impl/quic_url_impl.h",
@@ -2918,6 +2928,10 @@ if (is_linux) {
       "tools/quic/platform/impl/quic_socket_utils.h",
       "tools/quic/quic_client.cc",
       "tools/quic/quic_client.h",
+      "tools/quic/quic_multipath_client.cc",
+      "tools/quic/quic_multipath_client.h",
+      "tools/quic/quic_multipath_server.cc",
+      "tools/quic/quic_multipath_server.h",
       "tools/quic/quic_default_packet_writer.cc",
       "tools/quic/quic_default_packet_writer.h",
       "tools/quic/quic_epoll_alarm_factory.cc",
@@ -2961,6 +2975,36 @@ if (is_linux) {
   executable("epoll_quic_server") {
     sources = [
       "tools/quic/quic_server_bin.cc",
+    ]
+    deps = [
+      ":epoll_quic_tools",
+      ":epoll_server",
+      ":net",
+      ":simple_quic_tools",
+      "//base",
+      "//build/config:exe_and_shlib_deps",
+      "//third_party/boringssl",
+    ]
+  }
+
+  executable("quic_multipath_client") {
+    sources = [
+      "tools/quic/quic_multipath_client_bin.cc",
+    ]
+    deps = [
+      ":epoll_quic_tools",
+      ":epoll_server",
+      ":net",
+      ":simple_quic_tools",
+      "//base",
+      "//build/config:exe_and_shlib_deps",
+      "//third_party/boringssl",
+    ]
+  }
+
+  executable("quic_multipath_server") {
+    sources = [
+      "tools/quic/quic_multipath_server_bin.cc",
     ]
     deps = [
       ":epoll_quic_tools",

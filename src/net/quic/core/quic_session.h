@@ -25,6 +25,7 @@
 #include "net/quic/platform/api/quic_containers.h"
 #include "net/quic/platform/api/quic_export.h"
 #include "net/quic/platform/api/quic_socket_address.h"
+#include "net/quic/core/quic_connection_manager.h"
 
 namespace net {
 
@@ -36,7 +37,7 @@ namespace test {
 class QuicSessionPeer;
 }  // namespace test
 
-class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
+class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInterface {
  public:
   // An interface from the session to the entity owning the session.
   // This lets the session notify its owner (the Dispatcher) when the connection
@@ -83,7 +84,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
 
   virtual void Initialize();
 
-  // QuicConnectionVisitorInterface methods:
+  // QuicConnectionManagerVisitorInterface methods:
   void OnStreamFrame(const QuicStreamFrame& frame) override;
   void OnRstStream(const QuicRstStreamFrame& frame) override;
   void OnGoAway(const QuicGoAwayFrame& frame) override;
@@ -106,6 +107,9 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
   bool HasPendingHandshake() const override;
   bool HasOpenDynamicStreams() const override;
   void OnPathDegrading() override;
+  void OnAckFrame(const QuicAckFrame& frame) override;
+  void OnHandshakeComplete() override;
+  void OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override;
 
   // Called on every incoming packet. Passes |packet| through to |connection_|.
   virtual void ProcessUdpPacket(const QuicSocketAddress& self_address,
@@ -176,14 +180,15 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
   // not yet been created.
   bool IsClosedStream(QuicStreamId id);
 
-  QuicConnection* connection() { return connection_; }
-  const QuicConnection* connection() const { return connection_; }
+  QuicConnection* connection() { return connection_manager_->connection(); }
+  const QuicConnection* connection() const { return connection_manager_->connection(); }
+  QuicConnectionManager* connection_manager() { return connection_manager_; }
   size_t num_active_requests() const { return dynamic_stream_map_.size(); }
   const QuicSocketAddress& peer_address() const {
-    return connection_->peer_address();
+    return connection()->peer_address();
   }
   QuicConnectionId connection_id() const {
-    return connection_->connection_id();
+    return connection()->connection_id();
   }
 
   // Returns the number of currently open streams, excluding the reserved
@@ -218,7 +223,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
 
   QuicErrorCode error() const { return error_; }
 
-  Perspective perspective() const { return connection_->perspective(); }
+  Perspective perspective() const { return connection()->perspective(); }
 
   QuicFlowController* flow_controller() { return &flow_controller_; }
 
@@ -421,7 +426,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
   std::map<QuicStreamId, QuicStreamOffset>
       locally_closed_streams_highest_offset_;
 
-  QuicConnection* connection_;
+  QuicConnectionManager* connection_manager_;
 
   // May be null.
   Visitor* visitor_;

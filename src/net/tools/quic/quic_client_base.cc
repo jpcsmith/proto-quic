@@ -156,9 +156,9 @@ void QuicClientBase::StartConnect() {
     // and update the stats for the overall connection.
     UpdateStats();
   }
-
   CreateQuicClientSession(new QuicConnection(
-      GetNextConnectionId(), server_address(), helper(), alarm_factory(),
+      GetNextConnectionId(), GetLatestClientAddress(),
+      server_address(), helper(), alarm_factory(),
       writer,
       /* owns_writer= */ false, Perspective::IS_CLIENT, supported_versions()));
 

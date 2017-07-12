@@ -188,6 +188,10 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
     return packet_creator_.latched_flag_no_stop_waiting_frames();
   }
 
+  QuicPacketCreator& packet_creator() {
+    return packet_creator_;
+  }
+
  private:
   friend class test::QuicPacketGeneratorPeer;
 

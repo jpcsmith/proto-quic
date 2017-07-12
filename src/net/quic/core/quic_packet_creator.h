@@ -59,6 +59,17 @@ class QUIC_EXPORT_PRIVATE QuicPacketCreator {
 
   ~QuicPacketCreator();
 
+  // This frame will be prepended in every packet. Only applies to the next
+  // packet being created (does not influence the current packet). Takes
+  // ownership of the frames inside.
+  void SetPrependedFrames(const QuicFrames& frames) {
+    old_prepended_frames_.insert(
+        old_prepended_frames_.end(),
+        prepended_frames_.begin(),
+        prepended_frames_.end());
+    prepended_frames_ = frames;
+  }
+
   // Makes the framer not serialize the protocol version in sent packets.
   void StopSendingVersion();
 
@@ -317,6 +328,10 @@ class QUIC_EXPORT_PRIVATE QuicPacketCreator {
   // packet size. Please note, full padding does not consume pending padding
   // bytes.
   bool needs_full_padding_;
+
+  // These frames will always be added as the first frames in a packet.
+  QuicFrames prepended_frames_;
+  QuicFrames old_prepended_frames_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicPacketCreator);
 };

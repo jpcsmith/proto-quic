@@ -24,7 +24,8 @@ QuicAckFrame::QuicAckFrame(const QuicAckFrame& other) = default;
 QuicAckFrame::~QuicAckFrame() {}
 
 std::ostream& operator<<(std::ostream& os, const QuicAckFrame& ack_frame) {
-  os << "{ largest_observed: " << ack_frame.largest_observed
+  os << "{ subflow_id: " << ack_frame.subflow_id
+	 << ", largest_observed: " << ack_frame.largest_observed
      << ", ack_delay_time: " << ack_frame.ack_delay_time.ToMicroseconds()
      << ", packets: [ " << ack_frame.packets << " ]"
      << ", received_packets: [ ";

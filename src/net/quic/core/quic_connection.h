@@ -45,6 +45,7 @@
 #include "net/quic/platform/api/quic_export.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 #include "net/quic/platform/api/quic_string_piece.h"
+#include "net/quic/platform/api/quic_subflow_descriptor.h"
 
 namespace net {
 
@@ -160,6 +161,13 @@ class QUIC_EXPORT_PRIVATE QuicConnectionVisitorInterface {
   // Called to ask if any streams are open in this visitor, excluding the
   // reserved crypto and headers stream.
   virtual bool HasOpenDynamicStreams() const = 0;
+
+  // Called whenever an ACK frame is received
+  virtual void OnAckFrame(const QuicAckFrame& frame) = 0;
+
+  virtual void OnHandshakeComplete() = 0;
+
+  virtual void OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) = 0;
 };
 
 // Interface which gets callbacks from the QuicConnection at interesting
@@ -304,6 +312,19 @@ class QUIC_EXPORT_PRIVATE QuicConnection
 
   enum AckMode { TCP_ACKING, ACK_DECIMATION, ACK_DECIMATION_WITH_REORDERING };
 
+  enum SubflowState {
+    // Tried to open a subflow but did not get any ACK frame for this subflow yet.
+    // NEW_SUBFLOW frame is sent in every packet.
+    SUBFLOW_OPEN_INITIATED,
+    // The subflow was successfully established.
+    SUBFLOW_OPEN,
+    // Tried to close subflow but did not get any ACK frame for this subflow yet.
+    // SUBFLOW_CLOSE frame is sent in every packet.
+    SUBFLOW_CLOSE_INITIATED,
+    // The subflow was successfully closed.
+    SUBFLOW_CLOSED
+  };
+
   // Constructs a new QuicConnection for |connection_id| and |address| using
   // |writer| to write packets. |owns_writer| specifies whether the connection
   // takes ownership of |writer|. |helper| must outlive this connection.
@@ -315,7 +336,52 @@ class QUIC_EXPORT_PRIVATE QuicConnection
                  bool owns_writer,
                  Perspective perspective,
                  const QuicVersionVector& supported_versions);
+  QuicConnection(QuicConnectionId connection_id,
+                 QuicSocketAddress self_address,
+                 QuicSocketAddress peer_address,
+                 QuicConnectionHelperInterface* helper,
+                 QuicAlarmFactory* alarm_factory,
+                 QuicPacketWriter* writer,
+                 bool owns_writer,
+                 Perspective perspective,
+                 const QuicVersionVector& supported_versions);
+  QuicConnection(QuicConnectionId connection_id,
+                 QuicSocketAddress self_address,
+                 QuicSocketAddress peer_address,
+                 QuicConnectionHelperInterface* helper,
+                 QuicAlarmFactory* alarm_factory,
+                 QuicPacketWriter* writer,
+                 bool owns_writer,
+                 Perspective perspective,
+                 const QuicVersionVector& supported_versions,
+                 QuicFramer *framer,
+                 bool owns_framer,
+                 bool do_not_perform_handshake);
   ~QuicConnection() override;
+
+  // Creates a connection for a new subflow connected to |address|. The new
+  // connection will have the same encrypters and decrypters.
+  QuicConnection *CloneToSubflow(
+      QuicSubflowDescriptor descriptor,
+      QuicPacketWriter *writer,
+      bool owns_writer,
+      QuicSubflowId subflowId);
+
+  // Set the ownership of the QuicFramer
+  void SetOwnsFramer(bool owns_framer) { owns_framer_ = owns_framer; }
+  QuicFramer *Framer() { return framer_; }
+
+  // The state of this connection on the underlying subflow.
+  void SetSubflowState(SubflowState state) { subflow_state_ = state; }
+  enum SubflowState SubflowState() { return subflow_state_; }
+
+  bool SubflowCloseFrameReceived(QuicPacketNumber largestAckedPacketNumber) {
+    return first_subflow_close_frame_packet_number_ <= largestAckedPacketNumber;
+  }
+
+  void PrependNewSubflowFrame(QuicSubflowId subflowId);
+  void PrependSubflowCloseFrame(QuicSubflowId subflowId);
+  void RemovePrependedFrames();
 
   // Sets connection parameters from the supplied |config|.
   void SetFromConfig(const QuicConfig& config);
@@ -389,6 +455,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
                                 const QuicSocketAddress& peer_address,
                                 const QuicReceivedPacket& packet);
 
+  QuicSubflowDescriptor SubflowDescriptor() { return QuicSubflowDescriptor(self_address_,peer_address_); }
+
   // QuicBlockedWriterInterface
   // Called when the underlying connection becomes writable to allow queued
   // writes to happen.
@@ -419,11 +487,11 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   void SetSelfAddress(QuicSocketAddress address) { self_address_ = address; }
 
   // The version of the protocol this connection is using.
-  QuicVersion version() const { return framer_.version(); }
+  QuicVersion version() const { return framer_->version(); }
 
   // The versions of the protocol that this connection supports.
   const QuicVersionVector& supported_versions() const {
-    return framer_.supported_versions();
+    return framer_->supported_versions();
   }
 
   // From QuicFramerVisitorInterface
@@ -448,6 +516,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   bool OnGoAwayFrame(const QuicGoAwayFrame& frame) override;
   bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
   bool OnBlockedFrame(const QuicBlockedFrame& frame) override;
+  bool OnNewSubflowFrame(const QuicNewSubflowFrame& frame) override;
+  bool OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override;
   void OnPacketComplete() override;
 
   // QuicConnectionCloseDelegateInterface
@@ -626,6 +696,7 @@ class QUIC_EXPORT_PRIVATE QuicConnection
     ~ScopedPacketBundler();
 
    private:
+
     bool ShouldSendAck(AckBundling ack_mode) const;
 
     QuicConnection* connection_;
@@ -660,9 +731,9 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   void DiscoverMtu();
 
   // Return the name of the cipher of the primary decrypter of the framer.
-  const char* cipher_name() const { return framer_.decrypter()->cipher_name(); }
+  const char* cipher_name() const { return framer_->decrypter()->cipher_name(); }
   // Return the id of the cipher of the primary decrypter of the framer.
-  uint32_t cipher_id() const { return framer_.decrypter()->cipher_id(); }
+  uint32_t cipher_id() const { return framer_->decrypter()->cipher_id(); }
 
   std::vector<std::unique_ptr<QuicEncryptedPacket>>* termination_packets() {
     return termination_packets_.get();
@@ -690,6 +761,13 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   const QuicSocketAddress& last_packet_source_address() const {
     return last_packet_source_address_;
   }
+
+  // Notifies the visitor of the close and marks the connection as disconnected.
+  // Does not send a connection close frame to the peer.
+  void TearDownLocalConnectionState(QuicErrorCode error,
+                                    const std::string& details,
+                                    ConnectionCloseSource source,
+                                    bool notify_visitor = true);
 
  protected:
   // Calls cancel() on all the alarms owned by this connection.
@@ -751,12 +829,6 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   friend class test::PacketSavingConnection;
 
   typedef std::list<SerializedPacket> QueuedPacketList;
-
-  // Notifies the visitor of the close and marks the connection as disconnected.
-  // Does not send a connection close frame to the peer.
-  void TearDownLocalConnectionState(QuicErrorCode error,
-                                    const std::string& details,
-                                    ConnectionCloseSource source);
 
   // Writes the given packet to socket, encrypted with packet's
   // encryption_level. Returns true on successful write, and false if the writer
@@ -849,7 +921,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   // congestion controller if it is the case.
   void CheckIfApplicationLimited();
 
-  QuicFramer framer_;
+  QuicFramer *framer_; // Owned or not depending on |owns_framer_|.
+  bool owns_framer_;
   QuicConnectionHelperInterface* helper_;  // Not owned.
   QuicAlarmFactory* alarm_factory_;        // Not owned.
   PerPacketOptions* per_packet_options_;   // Not owned.
@@ -1093,6 +1166,15 @@ class QUIC_EXPORT_PRIVATE QuicConnection
 
   // Consecutive number of sent packets which have no retransmittable frames.
   size_t consecutive_num_packets_with_no_retransmittable_frames_;
+
+  // If this flag is set, the connection will send a NEW_SUBFLOW frame at the
+  // beginning of every packet. As soon as the peer receives an ACK for any
+  // packet on this subflow, he can stop transmitting NEW_SUBFLOW frames.
+  // bool should_send_new_subflow_frame_;
+
+  enum SubflowState subflow_state_;
+
+  QuicPacketNumber first_subflow_close_frame_packet_number_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnection);
 };

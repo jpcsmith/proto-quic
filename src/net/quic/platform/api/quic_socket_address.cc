@@ -28,6 +28,10 @@ bool operator!=(const QuicSocketAddress& lhs, const QuicSocketAddress& rhs) {
   return lhs.impl_ != rhs.impl_;
 }
 
+bool operator<(const QuicSocketAddress& lhs, const QuicSocketAddress& rhs) {
+  return lhs.impl_ < rhs.impl_;
+}
+
 bool QuicSocketAddress::IsInitialized() const {
   return impl_.IsInitialized();
 }

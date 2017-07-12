@@ -53,6 +53,8 @@ QuicPacketCreator::QuicPacketCreator(QuicConnectionId connection_id,
 
 QuicPacketCreator::~QuicPacketCreator() {
   DeleteFrames(&packet_.retransmittable_frames);
+  DeleteFrames(&prepended_frames_);
+  DeleteFrames(&old_prepended_frames_);
 }
 
 void QuicPacketCreator::SetEncrypter(EncryptionLevel level,
@@ -565,6 +567,8 @@ bool QuicPacketCreator::ShouldRetransmit(const QuicFrame& frame) {
     case PADDING_FRAME:
     case STOP_WAITING_FRAME:
     case MTU_DISCOVERY_FRAME:
+    case NEW_SUBFLOW_FRAME:
+    case SUBFLOW_CLOSE_FRAME:
       return false;
     default:
       return true;
@@ -573,6 +577,12 @@ bool QuicPacketCreator::ShouldRetransmit(const QuicFrame& frame) {
 
 bool QuicPacketCreator::AddFrame(const QuicFrame& frame,
                                  bool save_retransmittable_frames) {
+  if(queued_frames_.empty() && !prepended_frames_.empty() && &frame != &(*prepended_frames_.begin())) {
+    QUIC_DVLOG(1) << ENDPOINT << "Prepending frames.";
+    for(const QuicFrame& f: prepended_frames_) {
+      AddFrame(f, false);
+    }
+  }
   QUIC_DVLOG(1) << ENDPOINT << "Adding frame: " << frame;
   if (frame.type == STREAM_FRAME &&
       frame.stream_frame->stream_id != kCryptoStreamId &&

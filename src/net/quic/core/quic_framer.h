@@ -41,6 +41,8 @@ const size_t kQuicMaxStreamIdSize = 4;
 const size_t kQuicMaxStreamOffsetSize = 8;
 // Number of bytes reserved to store payload length in stream frame.
 const size_t kQuicStreamPayloadLengthSize = 2;
+// Number of bytes reserved for subflow id.
+const size_t kQuicSubflowIdSize = 4;
 
 // Size in bytes reserved for the delta time of the largest observed
 // packet number in ack frames.
@@ -135,8 +137,36 @@ class QUIC_EXPORT_PRIVATE QuicFramerVisitorInterface {
   // Called when a BlockedFrame has been parsed.
   virtual bool OnBlockedFrame(const QuicBlockedFrame& frame) = 0;
 
+  // Called when a NewSubflowFrame has been parsed.
+  virtual bool OnNewSubflowFrame(const QuicNewSubflowFrame& frame) = 0;
+
+  // Called when a SubflowCloseFrame has been parsed.
+  virtual bool OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) = 0;
+
   // Called when a packet has been completely processed.
   virtual void OnPacketComplete() = 0;
+};
+
+// Stores the decrypters and encrypters for a session.
+class QUIC_EXPORT_PRIVATE QuicFramerCryptoContext {
+public:
+  QuicFramerCryptoContext(Perspective perspective);
+  ~QuicFramerCryptoContext();
+
+  // Primary decrypter used to decrypt packets during parsing.
+  std::unique_ptr<QuicDecrypter> decrypter_;
+  // Alternative decrypter that can also be used to decrypt packets.
+  std::unique_ptr<QuicDecrypter> alternative_decrypter_;
+  // The encryption level of |decrypter_|.
+  EncryptionLevel decrypter_level_;
+  // The encryption level of |alternative_decrypter_|.
+  EncryptionLevel alternative_decrypter_level_;
+  // |alternative_decrypter_latch_| is true if, when |alternative_decrypter_|
+  // successfully decrypts a packet, we should install it as the only
+  // decrypter.
+  bool alternative_decrypter_latch_;
+  // Encrypters used to encrypt packets via EncryptPayload().
+  std::unique_ptr<QuicEncrypter> encrypter_[NUM_ENCRYPTION_LEVELS];
 };
 
 // Class for parsing and constructing QUIC packets.  It has a
@@ -150,6 +180,15 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   QuicFramer(const QuicVersionVector& supported_versions,
              QuicTime creation_time,
              Perspective perspective);
+
+  // Same as above but uses a QuicFramerCryptoContext object which is owned by the caller
+  // and sets the QuicVersion to a specific value.
+  QuicFramer(const QuicVersionVector& supported_versions,
+             QuicTime creation_time,
+             Perspective perspective,
+             QuicFramerCryptoContext *cc,
+             bool owns_cc,
+             QuicVersion version);
 
   virtual ~QuicFramer();
 
@@ -215,6 +254,10 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   static size_t GetStreamOffsetSize(QuicStreamOffset offset);
   // Size in bytes required for a serialized version negotiation packet
   static size_t GetVersionNegotiationPacketSize(size_t number_versions);
+  // Size in bytes of all NewSubflow frame fields.
+  static size_t GetNewSubflowFrameSize();
+  // Size in bytes of all SubflowClose frame fields.
+  static size_t GetSubflowCloseFrameSize();
 
   // Returns the number of bytes added to the packet for the specified frame,
   // and 0 if the frame doesn't fit.  Includes the header size for the first
@@ -287,6 +330,10 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // Changes the encrypter used for level |level| to |encrypter|. The function
   // takes ownership of |encrypter|.
   void SetEncrypter(EncryptionLevel level, QuicEncrypter* encrypter);
+
+  QuicFramerCryptoContext* CryptoContext() {
+    return cc_;
+  }
 
   // Encrypts a payload in |buffer|.  |ad_len| is the length of the associated
   // data. |total_len| is the length of the associated data plus plaintext.
@@ -395,6 +442,8 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
                                 QuicWindowUpdateFrame* frame);
   bool ProcessBlockedFrame(QuicDataReader* reader, QuicBlockedFrame* frame);
   void ProcessPaddingFrame(QuicDataReader* reader, QuicPaddingFrame* frame);
+  bool ProcessNewSubflowFrame(QuicDataReader* reader, QuicNewSubflowFrame* frame);
+  bool ProcessSubflowCloseFrame(QuicDataReader* reader, QuicSubflowCloseFrame* frame);
 
   bool DecryptPayload(QuicDataReader* encrypted_reader,
                       const QuicPacketHeader& header,
@@ -474,6 +523,10 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
                                QuicDataWriter* writer);
   bool AppendBlockedFrame(const QuicBlockedFrame& frame,
                           QuicDataWriter* writer);
+  bool AppendNewSubflowFrame(const QuicNewSubflowFrame& frame,
+                          QuicDataWriter* writer);
+  bool AppendSubflowCloseFrame(const QuicSubflowCloseFrame& frame,
+                          QuicDataWriter* writer);
   bool AppendPaddingFrame(const QuicPaddingFrame& frame,
                           QuicDataWriter* writer);
 
@@ -501,20 +554,10 @@ class QUIC_EXPORT_PRIVATE QuicFramer {
   // element, with subsequent elements in descending order (versions can be
   // skipped as necessary).
   QuicVersionVector supported_versions_;
-  // Primary decrypter used to decrypt packets during parsing.
-  std::unique_ptr<QuicDecrypter> decrypter_;
-  // Alternative decrypter that can also be used to decrypt packets.
-  std::unique_ptr<QuicDecrypter> alternative_decrypter_;
-  // The encryption level of |decrypter_|.
-  EncryptionLevel decrypter_level_;
-  // The encryption level of |alternative_decrypter_|.
-  EncryptionLevel alternative_decrypter_level_;
-  // |alternative_decrypter_latch_| is true if, when |alternative_decrypter_|
-  // successfully decrypts a packet, we should install it as the only
-  // decrypter.
-  bool alternative_decrypter_latch_;
-  // Encrypters used to encrypt packets via EncryptPayload().
-  std::unique_ptr<QuicEncrypter> encrypter_[NUM_ENCRYPTION_LEVELS];
+  // Crypto related objects such as QuicDecrypter and QuicEncrypter
+  QuicFramerCryptoContext *cc_;
+  // Whether the framer owns the QuicFramerCryptoContext object
+  bool owns_cc_;
   // Tracks if the framer is being used by the entity that received the
   // connection or the entity that initiated it.
   Perspective perspective_;

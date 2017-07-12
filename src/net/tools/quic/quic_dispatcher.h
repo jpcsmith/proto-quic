@@ -58,6 +58,8 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   // Takes ownership of |writer|.
   void InitializeWithWriter(QuicPacketWriter* writer);
 
+  void SetCurrentWriter(QuicPacketWriter *writer) { current_writer_ = writer; }
+
   // Process the incoming packet by creating a new session, passing it to
   // an existing session, or passing it to the time wait list.
   void ProcessPacket(const QuicSocketAddress& server_address,
@@ -146,6 +148,8 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
   bool OnGoAwayFrame(const QuicGoAwayFrame& frame) override;
   bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
   bool OnBlockedFrame(const QuicBlockedFrame& frame) override;
+  bool OnNewSubflowFrame(const QuicNewSubflowFrame& frame) override;
+  bool OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override;
   void OnPacketComplete() override;
 
   // QuicBufferedPacketStore::VisitorInterface implementation.
@@ -162,7 +166,8 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
  protected:
   virtual QuicSession* CreateQuicSession(
       QuicConnectionId connection_id,
-      const QuicSocketAddress& client_address) = 0;
+      const QuicSocketAddress& client_address,
+      const QuicSocketAddress& server_address) = 0;
 
   // Called when a connection is rejected statelessly.
   virtual void OnConnectionRejectedStatelessly();
@@ -394,6 +399,9 @@ class QuicDispatcher : public QuicTimeWaitListManager::Visitor,
 
   // True if this dispatcher is not draining.
   bool accept_new_connections_;
+
+  // The packet writer for the current packet in ProcessPacket(...)
+  QuicPacketWriter *current_writer_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicDispatcher);
 };
