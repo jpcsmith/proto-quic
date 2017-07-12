@@ -17,7 +17,8 @@ QuicConnectionManager::QuicConnectionManager(QuicConnection *connection)
       connections_(std::map<QuicSubflowId, QuicConnection*>()),
       next_outgoing_subflow_id_(connection->perspective() == Perspective::IS_SERVER ? 2 : 3),
       packet_handler_(nullptr),
-      current_subflow_id_(kInitialSubflowId) {
+      current_subflow_id_(kInitialSubflowId),
+      next_subflow_id_(0) {
   AddConnection(connection->SubflowDescriptor(), kInitialSubflowId, connection);
   connection->set_visitor(this);
   // if the connection has already established keys, we can start accepting new
@@ -127,36 +128,39 @@ void QuicConnectionManager::ProcessUdpPacket(const QuicSocketAddress& self_addre
                                    const QuicSocketAddress& peer_address,
                                    const QuicReceivedPacket& packet) {
   QuicSubflowDescriptor descriptor(self_address,peer_address);
-  QUIC_LOG(INFO) << "ProcessUdpPacket(" << self_address.ToString() << ", " << peer_address.ToString() << ")";
-  QUIC_LOG(INFO) << "subflow descriptor map entries:";
-  for(auto it = subflow_descriptor_map_.begin(); it != subflow_descriptor_map_.end(); ++it) {
-    QUIC_LOG(INFO) << "subflow descriptor=" << it->first.ToString() << " subflow id=" << it->second;
-  }
-  auto it = subflow_descriptor_map_.find(descriptor);
 
+  std::string s;
+  bool first = true;
+  for(auto debugIt: subflow_descriptor_map_) {
+    s += (first?"":", ") + std::to_string(debugIt.second);
+    first = false;
+  }
+  QUIC_LOG(INFO) << "ProcessUdpPacket(" << self_address.ToString() << ", " << peer_address.ToString() << "), subflows: " << s;
+
+  auto it = subflow_descriptor_map_.find(descriptor);
   // subflow already established
   if(it != subflow_descriptor_map_.end())
   {
-    QUIC_LOG(INFO) << "Packet on subflow (" << QuicSubflowDescriptor(self_address,peer_address).ToString() << "): Forwarded to connection";
+    QUIC_LOG(INFO) << "Packet forwarded to: " << it->second;
     connections_[it->second]->ProcessUdpPacket(self_address,peer_address,packet);
   }
   else
   {
     if(packet_handler_ == nullptr) {
-      QUIC_LOG(INFO) << "Packet on subflow (" << QuicSubflowDescriptor(self_address,peer_address).ToString() << "): Buffered";
+      QUIC_LOG(INFO) << "Packet buffered";
       // handshake not yet finished -> buffer request
       buffered_incoming_subflow_attempts_.push_back(
           std::pair<QuicSubflowDescriptor,std::unique_ptr<QuicReceivedPacket>>(
               QuicSubflowDescriptor(self_address,peer_address),packet.Clone()));
     } else {
       if(!packet_handler_->ProcessPacket(packet)) {
-        QUIC_LOG(INFO) << "Packet on subflow (" << QuicSubflowDescriptor(self_address,peer_address).ToString() << "): Error (Cannot accept new subflow)";
+        QUIC_LOG(INFO) << "Error accepting new subflow";
         //TODO error handling
         return;
       }
       else
       {
-        QUIC_LOG(INFO) << "Packet on subflow (" << QuicSubflowDescriptor(self_address,peer_address).ToString() << "): New incoming subflow (" << packet_handler_->GetLastSubflowId() << ")";
+        QUIC_LOG(INFO) << "New incoming subflow (" << packet_handler_->GetLastSubflowId() << ")";
         //TODO check for validity of subflow id (not too big?)
         OpenConnection(
             QuicSubflowDescriptor(self_address,peer_address),
@@ -208,6 +212,11 @@ void QuicConnectionManager::AddConnection(QuicSubflowDescriptor descriptor, Quic
       std::pair<QuicSubflowDescriptor, QuicSubflowId>(
           descriptor,
           subflowId));
+
+  // Try setting the current subflow id again now that we added a connection.
+  if(next_subflow_id_ != 0) {
+    set_current_subflow_id(next_subflow_id_);
+  }
   //connection->sent_packet_manager().SetSubflowId(subflowId);
 }
 
@@ -353,10 +362,18 @@ bool QuicConnectionManager::HasOpenDynamicStreams(const QuicSubflowId& subflowId
   if(visitor_) return visitor_->HasOpenDynamicStreams();
   return false;
 }
-void QuicConnectionManager::OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame, const QuicTime& arrival_time_of_packet) {
+bool QuicConnectionManager::OnAckFrame(const QuicSubflowId& subflowId,
+    const QuicAckFrame& frame, const QuicTime& arrival_time_of_packet) {
   auto it = connections_.find(frame.subflow_id);
   if(it != connections_.end()) {
     QuicConnection *connection = it->second;
+
+    // Forward the ack frame to the corresponding connection.
+    if(!connection->HandleIncomingAckFrame(frame,arrival_time_of_packet)) {
+      // Stop processing if an error is encountered.
+      return false;
+    }
+
     if(connection->SubflowState() == QuicConnection::SUBFLOW_OPEN_INITIATED) {
     // Acknowledge that a packet was received on the subflow, so we can
     // stop sending a NEW_SUBFLOW frame in every packet.
@@ -373,10 +390,9 @@ void QuicConnectionManager::OnAckFrame(const QuicSubflowId& subflowId, const Qui
     }
   } else {
     //TODO error handling
+    return false;
   }
-
-  // Forward the ack frame to the corresponding connection.
-  connections_[frame.subflow_id]->HandleIncomingAckFrame(frame,arrival_time_of_packet);
+  return true;
 }
 void QuicConnectionManager::OnSubflowCloseFrame(const QuicSubflowId& subflowId, const QuicSubflowCloseFrame& frame) {
   auto it = connections_.find(frame.subflow_id);
@@ -390,8 +406,18 @@ void QuicConnectionManager::OnSubflowCloseFrame(const QuicSubflowId& subflowId, 
 QuicFrames QuicConnectionManager::GetUpdatedAckFrames(const QuicSubflowId& subflow_id) {
   QuicTime now = AnyConnection()->clock()->ApproximateNow();
   QuicFrames frames;
-  for(auto it = connections_.begin(); it != connections_.end(); ++it) {
-    frames.push_back(it->second->GetUpdatedAckFrame(now));
+  uint32_t nAckFrames = 0;
+  if(connections_[subflow_id]->ack_frame_updated()) {
+    frames.push_back(connections_[subflow_id]->GetUpdatedAckFrame(now));
+    ++nAckFrames;
+  }
+  for(auto it = connections_.begin();
+      it != connections_.end() && nAckFrames < kMaxAckFramesPerResponse;
+      ++it) {
+    if(it->first != subflow_id && it->second->ack_frame_updated()) {
+      ++nAckFrames;
+      frames.push_back(it->second->GetUpdatedAckFrame(now));
+    }
   }
   return frames;
 }
@@ -401,8 +427,7 @@ void QuicConnectionManager::OnRetransmission(const QuicTransmissionInfo& transmi
   // bundled_packet_handler?
   
   // add frames to some connection
-  for(auto it : transmission_info->retransmittable_frames) {
-    connection->
+  connection->RetransmitFrames(transmission_info.retransmittable_frames);
 }
 
 

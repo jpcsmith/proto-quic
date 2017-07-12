@@ -72,6 +72,8 @@ const size_t kDefaultMaxStreamsPerConnection = 100;
 // The subflow id of the initial connection
 const uint32_t kInitialSubflowId = 1;
 
+const uint32_t kMaxAckFramesPerResponse = 5;
+
 // Number of bytes reserved for public flags in the packet header.
 const size_t kPublicFlagsSize = 1;
 // Number of bytes reserved for version number in the packet header.

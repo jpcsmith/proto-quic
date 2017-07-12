@@ -508,6 +508,8 @@ void QuicDispatcher::OnConnectionClosed(QuicConnectionId connection_id,
       << ") due to error: " << QuicErrorCodeToString(error)
       << ", with details: " << error_details;
 
+  it->second->connection_manager()->PrintDebuggingInformation();
+
   if (closed_session_list_.empty()) {
     delete_sessions_alarm_->Update(helper()->GetClock()->ApproximateNow(),
                                    QuicTime::Delta::Zero());

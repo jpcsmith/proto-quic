@@ -205,6 +205,7 @@ void QuicMultipathServer::OnEvent(int fd, EpollEvent* event) {
     }
   }
   if (event->in_events & EPOLLOUT) {
+    QUIC_DVLOG(1) << "EPOLLOUT";
     //TODO allow multiple outgoing connections -> multiple fds -> multiple writers
     dispatcher_->OnCanWrite();
     if (dispatcher_->HasPendingWrites()) {

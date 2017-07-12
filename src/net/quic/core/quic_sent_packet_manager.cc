@@ -368,7 +368,7 @@ void QuicSentPacketManager::MarkForRetransmission(
   // Always send handshake messages on the same connection
   // If we didn't specify a retransmission visitor, retransmit all
   // packets on this connection.
-  if(transmission_type == HANDSHAKE_RETRANSMISSION || retransmission_visitor_ == nullptr) {
+  //if(transmission_type == HANDSHAKE_RETRANSMISSION || retransmission_visitor_ == nullptr) {
 
     // Both TLP and the new RTO leave the packets in flight and let the loss
     // detection decide if packets are lost.
@@ -383,13 +383,15 @@ void QuicSentPacketManager::MarkForRetransmission(
       }
 
     pending_retransmissions_[packet_number] = transmission_type;
-  } else {
+  /*} else {
+    QUIC_LOG(INFO) << "MarkForRetransmission() not handshake";
     // Let the connection manager decide on which subflow to retransmit the packet.
+    DCHECK(false);
     unacked_packets_.RemoveFromInFlight(packet_number);
     if(retransmission_visitor_) {
       retransmission_visitor_->OnRetransmission(unacked_packets_.ExtractTransmissionInfo(packet_number));
     }
-  }
+  }*/
 }
 
 void QuicSentPacketManager::RecordOneSpuriousRetransmission(

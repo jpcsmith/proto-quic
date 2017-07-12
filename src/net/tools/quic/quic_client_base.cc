@@ -51,7 +51,9 @@ QuicClientBase::QuicClientBase(const QuicServerId& server_id,
       store_response_(false),
       latest_response_code_(-1) {}
 
-QuicClientBase::~QuicClientBase() {}
+QuicClientBase::~QuicClientBase() {
+  session_->connection_manager()->PrintDebuggingInformation();
+}
 
 void QuicClientBase::OnClose(QuicSpdyStream* stream) {
   DCHECK(stream != nullptr);

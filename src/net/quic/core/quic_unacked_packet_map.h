@@ -140,7 +140,7 @@ class QUIC_EXPORT_PRIVATE QuicUnackedPacketMap {
 
   // Looks up the QuicTransmissionInfo by |packet_number|, creates a copy, removes the
   // QuicTransmissionInfo from the queue and returns the copy.
-  const QuicTransmissionInfo& ExtractTransmissionInfo(QuicPacketNumber packet_number);
+  QuicTransmissionInfo ExtractTransmissionInfo(QuicPacketNumber packet_number);
 
   // Increases the largest observed.  Any packets less or equal to
   // |largest_acked_packet| are discarded if they are only for the RTT purposes.

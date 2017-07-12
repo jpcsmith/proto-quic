@@ -164,7 +164,7 @@ void QuicUnackedPacketMap::RemoveRetransmittability(
   RemoveRetransmittability(info);
 }
 
-const QuicTransmissionInfo& QuicUnackedPacketMap::ExtractTransmissionInfo(
+QuicTransmissionInfo QuicUnackedPacketMap::ExtractTransmissionInfo(
     QuicPacketNumber packet_number) {
   QuicTransmissionInfo* info =
       &unacked_packets_[packet_number - least_unacked_];

@@ -221,13 +221,11 @@ class QuicClientBase : public QuicClientPushPromiseIndex::Delegate,
     connected_or_attempting_connect_ = connected_or_attempting_connect;
   }
 
-  QuicPacketWriter* writer() { return writer_.get(); }
+  QuicPacketWriter* writer() { return writer_; }
   void set_writer(QuicPacketWriter* writer) {
-    if (writer_.get() != writer) {
-      writer_.reset(writer);
-    }
+    writer_ = writer;
   }
-  void reset_writer() { writer_.reset(); }
+  void reset_writer() {}
 
   QuicByteCount initial_max_packet_length() {
     return initial_max_packet_length_;
@@ -395,7 +393,8 @@ class QuicClientBase : public QuicClientPushPromiseIndex::Delegate,
   std::unique_ptr<QuicAlarmFactory> alarm_factory_;
 
   // Writer used to actually send packets to the wire. Must outlive |session_|.
-  std::unique_ptr<QuicPacketWriter> writer_;
+  // Not owned. Owned by either the subclass or the session.
+  QuicPacketWriter* writer_;
 
   // Index of pending promised streams. Must outlive |session_|.
   QuicClientPushPromiseIndex push_promise_index_;

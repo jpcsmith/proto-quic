@@ -109,7 +109,12 @@ public:
   }
   // Returns the connection that was marked as the currently active connection.
   QuicConnection *CurrentConnection() const {
-    return connections_.find(current_subflow_id_)->second;
+    auto it = connections_.find(current_subflow_id_);
+    if(it == connections_.end()) {
+      QUIC_LOG(INFO) << "CurrentConnection() tries to access subflow " << current_subflow_id_;
+      return nullptr;
+    }
+    return it->second;
   }
   // Returns a connection on some subflow.
   QuicConnection *AnyConnection() const {
@@ -122,12 +127,32 @@ public:
   }
 
   // Marks the connection with the subflow id |id| as the currently active connection.
-  void set_current_subflow_id(QuicSubflowId id) { current_subflow_id_ = id; }
+  // If the connection doesn't exist yet, the current connection will be set to
+  // the new connection as soon as possible.
+  void set_current_subflow_id(QuicSubflowId id) {
+    if(connections_.find(id) == connections_.end()) {
+      next_subflow_id_ = id;
+    } else {
+      QUIC_LOG(INFO) << "CurrentSubflow = " << id;
+      current_subflow_id_ = id;
+      next_subflow_id_ = 0;
+    }
+  }
 
   // Flow control
   QuicTime::Delta SmoothedRttForFlowController() {
     //TODO correctly handle flow control
     return InitialConnection()->sent_packet_manager().GetRttStats()->smoothed_rtt();
+  }
+
+  // Debugging output
+  void PrintDebuggingInformation() {
+    std::string s;
+    for(auto it: subflow_descriptor_map_) {
+      QuicConnection* connection = connections_.find(it.second)->second;
+      s = s + it.first.ToString() + ": " + connection->ToString() + "\n";
+    }
+    QUIC_LOG(INFO) << s;
   }
 
   // QUIC connection control
@@ -189,9 +214,10 @@ public:
   bool WillingAndAbleToWrite(const QuicSubflowId& subflowId) const override;
   bool HasPendingHandshake(const QuicSubflowId& subflowId) const override;
   bool HasOpenDynamicStreams(const QuicSubflowId& subflowId) const override;
-  void OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame, const QuicTime& arrival_time_of_packet) override;
+  bool OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame, const QuicTime& arrival_time_of_packet) override;
   void OnSubflowCloseFrame(const QuicSubflowId& subflowId, const QuicSubflowCloseFrame& frame) override;
   void OnRetransmission(const QuicTransmissionInfo& transmission_info) override;
+  QuicFrames GetUpdatedAckFrames(const QuicSubflowId& subflow_id) override;
 
 
 
@@ -347,7 +373,11 @@ private:
 
   std::map<QuicSubflowDescriptor, QuicPacketWriter*> packet_writer_map_;
 
+  // The subflow on which packets are sent.
   QuicSubflowId current_subflow_id_;
+
+  // The subflow that will be used as the current subflow as soon as it is open.
+  QuicSubflowId next_subflow_id_;
 
   /*std::map<QuicSubflowDescriptor, QuicSubflowCreationAttempt> subflow_attempt_map_;
 

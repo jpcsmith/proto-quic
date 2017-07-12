@@ -205,7 +205,6 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       last_decrypted_packet_level_(ENCRYPTION_NONE),
       should_last_packet_instigate_acks_(false),
       was_last_packet_missing_(false),
-      largest_seen_packet_with_ack_(0),
       largest_seen_packet_with_stop_waiting_(0),
       max_undecryptable_packets_(0),
       pending_version_negotiation_packet_(false),
@@ -273,7 +272,8 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       no_stop_waiting_frames_(false),
       consecutive_num_packets_with_no_retransmittable_frames_(0),
       subflow_state_(SUBFLOW_OPEN_INITIATED),
-      subflow_id_(subflow_id) {
+      subflow_id_(subflow_id),
+      largest_observed_last_delay_(QuicTime::Delta::Zero()) {
   QUIC_DLOG(INFO) << ENDPOINT
                   << "Created connection with connection_id: " << connection_id;
   framer_->set_visitor(this);
@@ -281,6 +281,7 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
   // TODO(ianswett): Supply the NetworkChangeVisitor as a constructor argument
   // and make it required non-null, because it's always used.
   sent_packet_manager_.SetNetworkChangeVisitor(this);
+  sent_packet_manager_.SetRetransmissionVisitor(this);
   // Allow the packet writer to potentially reduce the packet size to a value
   // even smaller than kDefaultMaxPacketSize.
   SetMaxPacketLength(perspective_ == Perspective::IS_SERVER
@@ -391,16 +392,17 @@ QuicConnection *QuicConnection::CloneToSubflow(
   return connection;
 }
 
-void QuicConnection::HandleIncomingAckFrame(
+bool QuicConnection::HandleIncomingAckFrame(
     const QuicAckFrame& frame,
     const QuicTime& arrival_time_of_packet) {
   DCHECK(connected_);
+  DCHECK(frame.subflow_id == subflow_id_);
   if (debug_visitor_ != nullptr) {
     debug_visitor_->OnAckFrame(frame);
   }
   QUIC_DVLOG(1) << ENDPOINT << "OnAckFrame: " << frame;
 
-  if (last_header_.packet_number <= largest_seen_packet_with_ack_) {
+  if (!IsNewAckFrame(frame)) {
     QUIC_DLOG(INFO) << ENDPOINT << "Received an old ack frame: ignoring";
     return true;
   }
@@ -415,7 +417,7 @@ void QuicConnection::HandleIncomingAckFrame(
   if (send_alarm_->IsSet()) {
     send_alarm_->Cancel();
   }
-  largest_seen_packet_with_ack_ = last_header_.packet_number;
+  largest_observed_last_delay_ = frame.ack_delay_time;
   sent_packet_manager_.OnIncomingAck(frame,
                                      arrival_time_of_packet);
   if (no_stop_waiting_frames_) {
@@ -438,6 +440,8 @@ void QuicConnection::HandleIncomingAckFrame(
   } else {
     stop_waiting_count_ = 0;
   }
+
+  return connected_;
 }
 
 
@@ -862,9 +866,10 @@ bool QuicConnection::OnStreamFrame(const QuicStreamFrame& frame) {
 
 bool QuicConnection::OnAckFrame(const QuicAckFrame& incoming_ack) {
   if(visitor_) {
-    visitor_->OnAckFrame(subflow_id_, incoming_ack, time_of_last_received_packet_);
+    return visitor_->OnAckFrame(subflow_id_, incoming_ack, time_of_last_received_packet_);
   }
-  return connected_;
+  DCHECK(false);
+  return false;
 }
 
 bool QuicConnection::OnStopWaitingFrame(const QuicStopWaitingFrame& frame) {
@@ -925,8 +930,7 @@ const char* QuicConnection::ValidateAckFrame(const QuicAckFrame& incoming_ack) {
     QUIC_LOG(INFO) << ENDPOINT << "Peer's largest_observed packet decreased:"
                    << incoming_ack.largest_observed << " vs "
                    << sent_packet_manager_.GetLargestObserved()
-                   << " packet_number:" << last_header_.packet_number
-                   << " largest seen with ack:" << largest_seen_packet_with_ack_
+                   << " last packet number (not necessarily related to this ACK frame):" << last_header_.packet_number
                    << " connection_id: " << connection_id_;
     // A new ack has a diminished largest_observed value.  Error out.
     // If this was an old packet, we wouldn't even have checked.
@@ -1157,9 +1161,10 @@ void QuicConnection::ClearLastFrames() {
 const QuicFrames QuicConnection::GetUpdatedAckFrames() {
   //TODO(cyrill) call visitor and collect all updated ack frames.
   if(visitor_) {
-    return visitor_->GetUpdatedAckFrames(subflow_id, clock_ApproximateNow());
+    return visitor_->GetUpdatedAckFrames(subflow_id_);
   }
-  return nullptr;
+  DCHECK(false);
+  return QuicFrames();
   //received_packet_manager_.GetUpdatedAckFrame(clock_->ApproximateNow());
 }
 
@@ -1387,6 +1392,10 @@ void QuicConnection::ProcessUdpPacket(const QuicSocketAddress& self_address,
   MaybeSendInResponseToPacket();
   SetPingAlarm();
   current_packet_data_ = nullptr;
+}
+
+void QuicConnection::RetransmitFrames(const QuicFrames& frames) {
+
 }
 
 void QuicConnection::OnCanWrite() {
@@ -1669,7 +1678,8 @@ bool QuicConnection::WritePacket(SerializedPacket* packet) {
                         : " ack only ")
                 << ", encryption level: "
                 << QuicUtils::EncryptionLevelToString(packet->encryption_level)
-                << ", encrypted length:" << encrypted_length;
+                << ", encrypted length:" << encrypted_length
+                << ", on subflow: " << subflow_id_;
   QUIC_DVLOG(2) << ENDPOINT << "packet(" << packet_number << "): " << std::endl
                 << QuicTextUtils::HexDump(QuicStringPiece(
                        packet->encrypted_buffer, encrypted_length));
@@ -2284,6 +2294,7 @@ void QuicConnection::SetRetransmissionAlarm() {
     return;
   }
   QuicTime retransmission_time = sent_packet_manager_.GetRetransmissionTime();
+  QUIC_LOG(INFO) << "The retransmission alarm was set to: " <<retransmission_time.ToDebuggingValue();
   retransmission_alarm_->Update(retransmission_time,
                                 QuicTime::Delta::FromMilliseconds(1));
 }
@@ -2586,6 +2597,26 @@ void QuicConnection::CheckIfApplicationLimited() {
       !visitor_->WillingAndAbleToWrite(subflow_id_)) {
     sent_packet_manager_.OnApplicationLimited();
   }
+}
+
+bool QuicConnection::IsNewAckFrame(const QuicAckFrame& frame) {
+  // No packet was received by the peer yet
+  if(frame.ack_delay_time == QuicTime::Delta::Infinite()) {
+    return false;
+  }
+
+  // This ACK frame acknowledges a new packet.
+  if(frame.largest_observed > sent_packet_manager_.GetLargestObserved()) {
+    return true;
+  }
+
+  // Acknowledges a resent packet.
+  if(frame.largest_observed == sent_packet_manager_.GetLargestObserved() &&
+      largest_observed_last_delay_ < frame.ack_delay_time) {
+    return true;
+  }
+
+  return false;
 }
 
 }  // namespace net

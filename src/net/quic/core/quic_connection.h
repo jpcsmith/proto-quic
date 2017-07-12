@@ -164,14 +164,18 @@ class QUIC_EXPORT_PRIVATE QuicConnectionVisitorInterface {
   // reserved crypto and headers stream.
   virtual bool HasOpenDynamicStreams(const QuicSubflowId& subflowId) const = 0;
 
-  // Called whenever an ACK frame is received
-  virtual void OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame, const QuicTime& arrival_time_of_packet) = 0;
+  // Called whenever an ACK frame is received. Returns false if the framer
+  // should stop processing after this frame.
+  virtual bool OnAckFrame(
+      const QuicSubflowId& subflowId,
+      const QuicAckFrame& frame,
+      const QuicTime& arrival_time_of_packet) = 0;
 
   virtual void OnSubflowCloseFrame(const QuicSubflowId& subflowId, const QuicSubflowCloseFrame& frame) = 0;
 
   virtual void OnRetransmission(const QuicTransmissionInfo& transmission_info) = 0;
 
-  virtual QuicFrames GetUpdatedAckFrames(const QuicSubflowId& subflow_id, const QuicTime& now) = 0;
+  virtual QuicFrames GetUpdatedAckFrames(const QuicSubflowId& subflow_id) = 0;
 };
 
 // Interface which gets callbacks from the QuicConnection at interesting
@@ -366,6 +370,13 @@ class QUIC_EXPORT_PRIVATE QuicConnection
                  QuicSubflowId subflow_id);
   ~QuicConnection() override;
 
+  // Debugging purposes
+  std::string ToString() {
+    return "<" + std::to_string(subflow_id_) + ", owns_writer_="+std::to_string(owns_writer_)+
+        ", stats(r/s)=(" + std::to_string(GetStats().packets_received) +
+        "/" + std::to_string(GetStats().packets_sent) + ") >";
+  }
+
   // Creates a connection for a new subflow connected to |address|. The new
   // connection will have the same encrypters and decrypters.
   QuicConnection *CloneToSubflow(
@@ -386,7 +397,9 @@ class QUIC_EXPORT_PRIVATE QuicConnection
     return first_subflow_close_frame_packet_number_ <= largestAckedPacketNumber;
   }
 
-  void HandleIncomingAckFrame(
+  // Processes incoming ack frames for this connection. Returns false if the frame
+  // is invalid.
+  bool HandleIncomingAckFrame(
       const QuicAckFrame& frame,
       const QuicTime& arrival_time_of_packet);
 
@@ -465,6 +478,12 @@ class QUIC_EXPORT_PRIVATE QuicConnection
                                 const QuicReceivedPacket& packet);
 
   QuicSubflowDescriptor SubflowDescriptor() { return QuicSubflowDescriptor(self_address_,peer_address_); }
+
+  QuicFrame GetUpdatedAckFrame(const QuicTime& now) {
+    return received_packet_manager_.GetUpdatedAckFrame(now);
+  }
+
+  void RetransmitFrames(const QuicFrames& frames);
 
   // QuicBlockedWriterInterface
   // Called when the underlying connection becomes writable to allow queued
@@ -942,6 +961,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   // congestion controller if it is the case.
   void CheckIfApplicationLimited();
 
+  bool IsNewAckFrame(const QuicAckFrame& frame);
+
   QuicFramer *framer_; // Owned or not depending on |owns_framer_|.
   bool owns_framer_;
   QuicConnectionHelperInterface* helper_;  // Not owned.
@@ -980,10 +1001,6 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   bool should_last_packet_instigate_acks_;
   // Whether the most recent packet was missing before it was received.
   bool was_last_packet_missing_;
-
-  // Track some peer state so we can do less bookkeeping
-  // Largest sequence sent by the peer which had an ack frame (latest ack info).
-  QuicPacketNumber largest_seen_packet_with_ack_;
 
   // Largest packet number sent by the peer which had a stop waiting frame.
   QuicPacketNumber largest_seen_packet_with_stop_waiting_;
@@ -1192,6 +1209,9 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   QuicSubflowId subflow_id_;
 
   QuicPacketNumber first_subflow_close_frame_packet_number_;
+
+  // largest observed delay from the last ACK frame.
+  QuicTime::Delta largest_observed_last_delay_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnection);
 };
