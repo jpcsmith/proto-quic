@@ -44,12 +44,13 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerStreamBase : public QuicCryptoStream {
   // GetBase64SHA256ClientChannelID sets |*output| to the base64 encoded,
   // SHA-256 hash of the client's ChannelID key and returns true, if the client
   // presented a ChannelID. Otherwise it returns false.
-  virtual bool GetBase64SHA256ClientChannelID(std::string* output) const = 0;
+  virtual bool GetBase64SHA256ClientChannelID(QuicConnection* connection,
+      std::string* output) const = 0;
 
   virtual int NumServerConfigUpdateMessagesSent() const = 0;
 
   // Sends the latest server config and source-address token to the client.
-  virtual void SendServerConfigUpdate(
+  virtual void SendServerConfigUpdate(QuicConnection* connection,
       const CachedNetworkParameters* cached_network_params) = 0;
 
   // These are all accessors and setters to their respective counters.
@@ -59,9 +60,9 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerStreamBase : public QuicCryptoStream {
   virtual bool PeerSupportsStatelessRejects() const = 0;
   virtual bool ZeroRttAttempted() const = 0;
   virtual void SetPeerSupportsStatelessRejects(bool set) = 0;
-  virtual const CachedNetworkParameters* PreviousCachedNetworkParams()
-      const = 0;
-  virtual void SetPreviousCachedNetworkParams(
+  virtual const CachedNetworkParameters* PreviousCachedNetworkParams(
+      QuicConnection* connection) const = 0;
+  virtual void SetPreviousCachedNetworkParams(QuicConnection* connection,
       CachedNetworkParameters cached_network_params) = 0;
 
   // Checks the options on the handshake-message to see whether the
@@ -104,19 +105,21 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerStream
   // From QuicCryptoServerStreamBase
   void CancelOutstandingCallbacks() override;
   void OnHandshakeMessage(const CryptoHandshakeMessage& message) override;
-  bool GetBase64SHA256ClientChannelID(std::string* output) const override;
-  void SendServerConfigUpdate(
+  bool GetBase64SHA256ClientChannelID(QuicConnection* connection,
+      std::string* output) const override;
+  void SendServerConfigUpdate(QuicConnection* connection,
       const CachedNetworkParameters* cached_network_params) override;
   uint8_t NumHandshakeMessages() const override;
   uint8_t NumHandshakeMessagesWithServerNonces() const override;
   int NumServerConfigUpdateMessagesSent() const override;
-  const CachedNetworkParameters* PreviousCachedNetworkParams() const override;
+  const CachedNetworkParameters* PreviousCachedNetworkParams(
+      QuicConnection* connection) const override;
   bool UseStatelessRejectsIfPeerSupported() const override;
   bool PeerSupportsStatelessRejects() const override;
   bool ZeroRttAttempted() const override;
   void SetPeerSupportsStatelessRejects(
       bool peer_supports_stateless_rejects) override;
-  void SetPreviousCachedNetworkParams(
+  void SetPreviousCachedNetworkParams(QuicConnection* connection,
       CachedNetworkParameters cached_network_params) override;
 
   // NOTE: Indicating that the Expect-CT header should be sent here presents
@@ -129,6 +132,8 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerStream
   }
 
  protected:
+  class QuicCryptoServerStreamConnectionState;
+
   virtual void ProcessClientHello(
       QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
           result,
@@ -140,59 +145,165 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerStream
   virtual void OverrideQuicConfigDefaults(QuicConfig* config);
 
   // Returns client address used to generate and validate source address token.
-  virtual const QuicSocketAddress GetClientAddress();
+  virtual const QuicSocketAddress GetClientAddress(QuicCryptoServerStreamConnectionState* cs);
+
+  class QUIC_EXPORT_PRIVATE QuicCryptoServerStreamConnectionState : public QuicCryptoStreamConnectionState {
+  public:
+    QuicCryptoServerStreamConnectionState(QuicConnection* connection,
+                      QuicCryptoServerStream* stream);
+
+    ~QuicCryptoServerStreamConnectionState() override;
+
+    class ProcessClientHelloCallback : public ProcessClientHelloResultCallback {
+     public:
+      ProcessClientHelloCallback(
+          QuicCryptoServerStreamConnectionState* parent,
+          const QuicReferenceCountedPointer<
+              ValidateClientHelloResultCallback::Result>& result);
+      ~ProcessClientHelloCallback() override;
+
+      void Run(QuicErrorCode error,
+               const std::string& error_details,
+               std::unique_ptr<CryptoHandshakeMessage> message,
+               std::unique_ptr<DiversificationNonce> diversification_nonce,
+               std::unique_ptr<net::ProofSource::Details> proof_source_details) override;
+
+      void Cancel();
+
+     private:
+      QuicCryptoServerStreamConnectionState* parent_;
+      QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
+          result_;
+    };
+
+    class ValidateCallback : public ValidateClientHelloResultCallback {
+     public:
+      explicit ValidateCallback(QuicCryptoServerStreamConnectionState* parent);
+      // To allow the parent to detach itself from the callback before deletion.
+      void Cancel();
+
+      // From ValidateClientHelloResultCallback
+      void Run(QuicReferenceCountedPointer<Result> result,
+               std::unique_ptr<ProofSource::Details> details) override;
+
+     private:
+      QuicCryptoServerStreamConnectionState* parent_;
+
+      DISALLOW_COPY_AND_ASSIGN(ValidateCallback);
+    };
+
+    class SendServerConfigUpdateCallback
+        : public BuildServerConfigUpdateMessageResultCallback {
+     public:
+      explicit SendServerConfigUpdateCallback(QuicCryptoServerStreamConnectionState* parent);
+      SendServerConfigUpdateCallback(const SendServerConfigUpdateCallback&) =
+          delete;
+      void operator=(const SendServerConfigUpdateCallback&) = delete;
+
+      // To allow the parent to detach itself from the callback before deletion.
+      void Cancel();
+
+      // From BuildServerConfigUpdateMessageResultCallback
+      void Run(bool ok, const CryptoHandshakeMessage& message) override;
+
+     private:
+      QuicCryptoServerStreamConnectionState* parent_;
+    };
+
+    // Number of handshake messages received by this stream.
+    uint8_t num_handshake_messages_;
+
+    // Number of handshake messages received by this stream that contain
+    // server nonces (indicating that this is a non-zero-RTT handshake
+    // attempt).
+    uint8_t num_handshake_messages_with_server_nonces_;
+
+    // Pointer to the active callback that will receive the result of
+    // BuildServerConfigUpdateMessage and forward it to
+    // FinishSendServerConfigUpdate.  nullptr if no update message is currently
+    // being built.
+    SendServerConfigUpdateCallback* send_server_config_update_cb_;
+
+    // Number of server config update (SCUP) messages sent by this stream.
+    int num_server_config_update_messages_sent_;
+
+    // If the client provides CachedNetworkParameters in the STK in the CHLO, then
+    // store here, and send back in future STKs if we have no better bandwidth
+    // estimate to send.
+    std::unique_ptr<CachedNetworkParameters> previous_cached_network_params_;
+
+    // Contains any source address tokens which were present in the CHLO.
+    SourceAddressTokens previous_source_address_tokens_;
+
+    // True if client attempts 0-rtt handshake (which can succeed or fail). If
+    // stateless rejects are used, this variable will be false for the stateless
+    // rejected connection and true for subsequent connections.
+    bool zero_rtt_attempted_;
+
+    // Pointer to the active callback that will receive the result of the client
+    // hello validation request and forward it to FinishProcessingHandshakeMessage
+    // for processing.  nullptr if no handshake message is being validated.  Note
+    // that this field is mutually exclusive with process_client_hello_cb_.
+    ValidateCallback* validate_client_hello_cb_;
+
+    // Pointer to the active callback which will receive the results of
+    // ProcessClientHello and forward it to
+    // FinishProcessingHandshakeMessageAfterProcessClientHello.  Note that this
+    // field is mutually exclusive with validate_client_hello_cb_.
+    ProcessClientHelloCallback* process_client_hello_cb_;
+
+    // Size of the packet containing the most recently received CHLO.
+    QuicByteCount chlo_packet_size_;
+
+    QuicCryptoServerStream* stream_;
+
+        private:
+    // Invoked by ValidateCallback::RunImpl once initial validation of
+    // the client hello is complete.  Finishes processing of the client
+    // hello message and handles handshake success/failure.
+    void FinishProcessingHandshakeMessage(
+        QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
+            result,
+        std::unique_ptr<ProofSource::Details> details);
+
+
+    // Portion of FinishProcessingHandshakeMessage which executes after
+    // ProcessClientHello has been called.
+    void FinishProcessingHandshakeMessageAfterProcessClientHello(
+        const ValidateClientHelloResultCallback::Result& result,
+        QuicErrorCode error,
+        const std::string& error_details,
+        std::unique_ptr<CryptoHandshakeMessage> reply,
+        std::unique_ptr<DiversificationNonce> diversification_nonce,
+        std::unique_ptr<ProofSource::Details> proof_source_details);
+
+    // Invoked by SendServerConfigUpdateCallback::RunImpl once the proof has been
+    // received.  |ok| indicates whether or not the proof was successfully
+    // acquired, and |message| holds the partially-constructed message from
+    // SendServerConfigUpdate.
+    void FinishSendServerConfigUpdate(bool ok,
+                                      const CryptoHandshakeMessage& message);
+  };
 
  private:
   friend class test::QuicCryptoServerStreamPeer;
 
-  class ValidateCallback : public ValidateClientHelloResultCallback {
-   public:
-    explicit ValidateCallback(QuicCryptoServerStream* parent);
-    // To allow the parent to detach itself from the callback before deletion.
-    void Cancel();
-
-    // From ValidateClientHelloResultCallback
-    void Run(QuicReferenceCountedPointer<Result> result,
-             std::unique_ptr<ProofSource::Details> details) override;
-
-   private:
-    QuicCryptoServerStream* parent_;
-
-    DISALLOW_COPY_AND_ASSIGN(ValidateCallback);
-  };
-
-  class SendServerConfigUpdateCallback
-      : public BuildServerConfigUpdateMessageResultCallback {
-   public:
-    explicit SendServerConfigUpdateCallback(QuicCryptoServerStream* parent);
-    SendServerConfigUpdateCallback(const SendServerConfigUpdateCallback&) =
-        delete;
-    void operator=(const SendServerConfigUpdateCallback&) = delete;
-
-    // To allow the parent to detach itself from the callback before deletion.
-    void Cancel();
-
-    // From BuildServerConfigUpdateMessageResultCallback
-    void Run(bool ok, const CryptoHandshakeMessage& message) override;
-
-   private:
-    QuicCryptoServerStream* parent_;
-  };
+  void AddConnectionState(QuicConnection* connection);
 
   // Invoked by ValidateCallback::RunImpl once initial validation of
   // the client hello is complete.  Finishes processing of the client
   // hello message and handles handshake success/failure.
   void FinishProcessingHandshakeMessage(
+      QuicCryptoServerStreamConnectionState* cs,
       QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
           result,
       std::unique_ptr<ProofSource::Details> details);
 
-  class ProcessClientHelloCallback;
-  friend class ProcessClientHelloCallback;
 
   // Portion of FinishProcessingHandshakeMessage which executes after
   // ProcessClientHello has been called.
   void FinishProcessingHandshakeMessageAfterProcessClientHello(
+      QuicCryptoServerStreamConnectionState* cs,
       const ValidateClientHelloResultCallback::Result& result,
       QuicErrorCode error,
       const std::string& error_details,
@@ -204,12 +315,13 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerStream
   // received.  |ok| indicates whether or not the proof was successfully
   // acquired, and |message| holds the partially-constructed message from
   // SendServerConfigUpdate.
-  void FinishSendServerConfigUpdate(bool ok,
-                                    const CryptoHandshakeMessage& message);
+  void FinishSendServerConfigUpdate(QuicCryptoServerStreamConnectionState* cs,
+      bool ok, const CryptoHandshakeMessage& message);
 
   // Returns a new ConnectionId to be used for statelessly rejected connections
   // if |use_stateless_rejects| is true. Returns 0 otherwise.
-  QuicConnectionId GenerateConnectionIdForReject(bool use_stateless_rejects);
+  QuicConnectionId GenerateConnectionIdForReject(
+      QuicCryptoServerStreamConnectionState* cs, bool use_stateless_rejects);
 
   // crypto_config_ contains crypto parameters for the handshake.
   const QuicCryptoServerConfig* crypto_config_;
@@ -229,31 +341,6 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerStream
   // Pointer to the helper for this crypto stream. Must outlive this stream.
   Helper* helper_;
 
-  // Number of handshake messages received by this stream.
-  uint8_t num_handshake_messages_;
-
-  // Number of handshake messages received by this stream that contain
-  // server nonces (indicating that this is a non-zero-RTT handshake
-  // attempt).
-  uint8_t num_handshake_messages_with_server_nonces_;
-
-  // Pointer to the active callback that will receive the result of
-  // BuildServerConfigUpdateMessage and forward it to
-  // FinishSendServerConfigUpdate.  nullptr if no update message is currently
-  // being built.
-  SendServerConfigUpdateCallback* send_server_config_update_cb_;
-
-  // Number of server config update (SCUP) messages sent by this stream.
-  int num_server_config_update_messages_sent_;
-
-  // If the client provides CachedNetworkParameters in the STK in the CHLO, then
-  // store here, and send back in future STKs if we have no better bandwidth
-  // estimate to send.
-  std::unique_ptr<CachedNetworkParameters> previous_cached_network_params_;
-
-  // Contains any source address tokens which were present in the CHLO.
-  SourceAddressTokens previous_source_address_tokens_;
-
   // If true, the server should use stateless rejects, so long as the
   // client supports them, as indicated by
   // peer_supports_stateless_rejects_.
@@ -264,26 +351,6 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerStream
   //  TODO(jokulik): Remove once client stateless reject support
   // becomes the default.
   bool peer_supports_stateless_rejects_;
-
-  // True if client attempts 0-rtt handshake (which can succeed or fail). If
-  // stateless rejects are used, this variable will be false for the stateless
-  // rejected connection and true for subsequent connections.
-  bool zero_rtt_attempted_;
-
-  // Size of the packet containing the most recently received CHLO.
-  QuicByteCount chlo_packet_size_;
-
-  // Pointer to the active callback that will receive the result of the client
-  // hello validation request and forward it to FinishProcessingHandshakeMessage
-  // for processing.  nullptr if no handshake message is being validated.  Note
-  // that this field is mutually exclusive with process_client_hello_cb_.
-  ValidateCallback* validate_client_hello_cb_;
-
-  // Pointer to the active callback which will receive the results of
-  // ProcessClientHello and forward it to
-  // FinishProcessingHandshakeMessageAfterProcessClientHello.  Note that this
-  // field is mutually exclusive with validate_client_hello_cb_.
-  ProcessClientHelloCallback* process_client_hello_cb_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicCryptoServerStream);
 };

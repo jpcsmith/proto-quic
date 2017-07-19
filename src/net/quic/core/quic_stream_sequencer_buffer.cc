@@ -85,7 +85,8 @@ QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
     QuicStringPiece data,
     QuicTime timestamp,
     size_t* const bytes_buffered,
-    std::string* error_details) {
+    std::string* error_details,
+    QuicConnection* connection) {
   CHECK_EQ(destruction_indicator_, 123456) << "This object has been destructed";
   *bytes_buffered = 0;
   QuicStreamOffset offset = starting_offset;
@@ -226,7 +227,7 @@ QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
   UpdateGapList(current_gap, starting_offset, total_written);
 
   frame_arrival_time_map_.insert(
-      std::make_pair(starting_offset, FrameInfo(size, timestamp)));
+      std::make_pair(starting_offset, FrameInfo(size, timestamp, connection)));
   num_bytes_buffered_ += total_written;
   return QUIC_NO_ERROR;
 }
@@ -322,6 +323,14 @@ QuicErrorCode QuicStreamSequencerBuffer::Readv(const iovec* dest_iov,
     UpdateFrameArrivalMap(total_bytes_read_);
   }
   return QUIC_NO_ERROR;
+}
+
+int QuicStreamSequencerBuffer::GetReadableRegion(struct iovec* iov, QuicStreamSequencerBuffer::FrameInfo* fi) const {
+  if(frame_arrival_time_map_.find(total_bytes_read_) != frame_arrival_time_map_.end()) {
+    *fi = frame_arrival_time_map_[total_bytes_read_];
+  }
+  int iov_used = GetReadableRegions(iov, 1);
+  return iov_used;
 }
 
 int QuicStreamSequencerBuffer::GetReadableRegions(struct iovec* iov,

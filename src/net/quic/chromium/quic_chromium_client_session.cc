@@ -684,14 +684,15 @@ void QuicChromiumClientSession::OnHeadersHeadOfLineBlocking(
       base::TimeDelta::FromMicroseconds(delta.ToMicroseconds()));
 }
 
-void QuicChromiumClientSession::OnStreamFrame(const QuicStreamFrame& frame) {
+void QuicChromiumClientSession::OnStreamFrame(const QuicStreamFrame& frame,
+    QuicConnection* connection) {
   // Record total number of stream frames.
   UMA_HISTOGRAM_COUNTS("Net.QuicNumStreamFramesInPacket", 1);
 
   // Record number of frames per stream in packet.
   UMA_HISTOGRAM_COUNTS("Net.QuicNumStreamFramesPerStreamInPacket", 1);
 
-  return QuicSpdySession::OnStreamFrame(frame);
+  return QuicSpdySession::OnStreamFrame(frame, connection);
 }
 
 void QuicChromiumClientSession::AddHandle(Handle* handle) {
@@ -764,10 +765,10 @@ void QuicChromiumClientSession::CancelRequest(StreamRequest* request) {
 }
 
 bool QuicChromiumClientSession::ShouldCreateOutgoingDynamicStream() {
-  if (!crypto_stream_->encryption_established()) {
-    DVLOG(1) << "Encryption not active so no outgoing stream created.";
-    return false;
-  }
+  //if (!crypto_stream_->encryption_established()) {
+  //  DVLOG(1) << "Encryption not active so no outgoing stream created.";
+  //  return false;
+  //}
   if (GetNumOpenOutgoingStreams() >= max_open_outgoing_streams()) {
     DVLOG(1) << "Failed to create a new outgoing stream. "
              << "Already " << GetNumOpenOutgoingStreams() << " open.";
@@ -839,7 +840,7 @@ bool QuicChromiumClientSession::GetSSLInfo(SSLInfo* ssl_info) const {
 
   // Map QUIC AEADs to the corresponding TLS 1.3 cipher. OpenSSL's cipher suite
   // numbers begin with a stray 0x03, so mask them off.
-  QuicTag aead = crypto_stream_->crypto_negotiated_params().aead;
+  QuicTag aead = kAESG;// = crypto_stream_->crypto_negotiated_params().aead;
   uint16_t cipher_suite;
   int security_bits;
   switch (aead) {
@@ -861,17 +862,17 @@ bool QuicChromiumClientSession::GetSSLInfo(SSLInfo* ssl_info) const {
                                 &ssl_connection_status);
 
   // Report the QUIC key exchange as the corresponding TLS curve.
-  switch (crypto_stream_->crypto_negotiated_params().key_exchange) {
-    case kP256:
-      ssl_info->key_exchange_group = SSL_CURVE_SECP256R1;
-      break;
-    case kC255:
-      ssl_info->key_exchange_group = SSL_CURVE_X25519;
-      break;
-    default:
-      NOTREACHED();
-      return false;
-  }
+  //switch (crypto_stream_->crypto_negotiated_params().key_exchange) {
+  //  case kP256:
+  //    ssl_info->key_exchange_group = SSL_CURVE_SECP256R1;
+  //    break;
+  //  case kC255:
+  //    ssl_info->key_exchange_group = SSL_CURVE_X25519;
+  //    break;
+  //  default:
+  //    NOTREACHED();
+  //    return false;
+  //}
 
   ssl_info->public_key_hashes = cert_verify_result_->public_key_hashes;
   ssl_info->is_issued_by_known_root =
@@ -880,18 +881,18 @@ bool QuicChromiumClientSession::GetSSLInfo(SSLInfo* ssl_info) const {
 
   ssl_info->connection_status = ssl_connection_status;
   ssl_info->client_cert_sent = false;
-  ssl_info->channel_id_sent = crypto_stream_->WasChannelIDSent();
+  //ssl_info->channel_id_sent = crypto_stream_->WasChannelIDSent();
   ssl_info->security_bits = security_bits;
   ssl_info->handshake_type = SSLInfo::HANDSHAKE_FULL;
   ssl_info->pinning_failure_log = pinning_failure_log_;
 
   ssl_info->UpdateCertificateTransparencyInfo(*ct_verify_result_);
 
-  if (crypto_stream_->crypto_negotiated_params().token_binding_key_param ==
-      kTB10) {
-    ssl_info->token_binding_negotiated = true;
-    ssl_info->token_binding_key_param = TB_PARAM_ECDSAP256;
-  }
+  //if (crypto_stream_->crypto_negotiated_params().token_binding_key_param ==
+  //    kTB10) {
+  //  ssl_info->token_binding_negotiated = true;
+  //  ssl_info->token_binding_key_param = TB_PARAM_ECDSAP256;
+  //}
 
   return true;
 }
@@ -927,8 +928,8 @@ int QuicChromiumClientSession::CryptoConnect(
   RecordHandshakeState(STATE_STARTED);
   DCHECK(flow_controller());
 
-  if (!crypto_stream_->CryptoConnect())
-    return ERR_QUIC_HANDSHAKE_FAILED;
+  //if (!crypto_stream_->CryptoConnect())
+  //  return ERR_QUIC_HANDSHAKE_FAILED;
 
   if (IsCryptoHandshakeConfirmed()) {
     connect_timing_.connect_end = base::TimeTicks::Now();
@@ -945,7 +946,7 @@ int QuicChromiumClientSession::CryptoConnect(
 }
 
 int QuicChromiumClientSession::GetNumSentClientHellos() const {
-  return crypto_stream_->num_sent_client_hellos();
+  return 0;//crypto_stream_->num_sent_client_hellos();
 }
 
 QuicStreamId QuicChromiumClientSession::GetStreamIdForPush(
@@ -1048,7 +1049,7 @@ void QuicChromiumClientSession::SendRstStream(QuicStreamId id,
 
 void QuicChromiumClientSession::OnClosedStream() {
   if (GetNumOpenOutgoingStreams() < max_open_outgoing_streams() &&
-      !stream_requests_.empty() && crypto_stream_->encryption_established() &&
+      !stream_requests_.empty() && //crypto_stream_->encryption_established() &&
       !goaway_received() && !going_away_ && connected()) {
     StreamRequest* request = stream_requests_.front();
     // TODO(ckrasic) - analyze data and then add logic to mark QUIC
@@ -1446,7 +1447,7 @@ void QuicChromiumClientSession::OnProofValid(
   QuicServerInfo::State* state = server_info_->mutable_state();
 
   state->server_config = cached.server_config();
-  state->source_address_token = cached.source_address_token();
+  //state->source_address_token = cached.source_address_token();
   state->cert_sct = cached.cert_sct();
   state->chlo_hash = cached.chlo_hash();
   state->server_config_sig = cached.signature();

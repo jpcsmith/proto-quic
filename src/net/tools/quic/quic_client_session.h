@@ -50,7 +50,7 @@ class QuicClientSession : public QuicClientSessionBase {
       const ProofVerifyDetails& verify_details) override;
 
   // Performs a crypto handshake with the server.
-  virtual void CryptoConnect();
+  virtual void CryptoConnect(QuicConnection* connection);
 
   // Returns the number of client hello messages that have been sent on the
   // crypto stream. If the handshake has completed then this is one greater

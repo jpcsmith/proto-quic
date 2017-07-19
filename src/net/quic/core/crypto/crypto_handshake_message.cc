@@ -26,7 +26,8 @@ CryptoHandshakeMessage::CryptoHandshakeMessage(
     const CryptoHandshakeMessage& other)
     : tag_(other.tag_),
       tag_value_map_(other.tag_value_map_),
-      minimum_size_(other.minimum_size_) {
+      minimum_size_(other.minimum_size_),
+      connection_(other.connection_) {
   // Don't copy serialized_. unique_ptr doesn't have a copy constructor.
   // The new object can lazily reconstruct serialized_.
 }
@@ -40,6 +41,7 @@ CryptoHandshakeMessage& CryptoHandshakeMessage::operator=(
     const CryptoHandshakeMessage& other) {
   tag_ = other.tag_;
   tag_value_map_ = other.tag_value_map_;
+  connection_ = other.connection_;
   // Don't copy serialized_. unique_ptr doesn't have an assignment operator.
   // However, invalidate serialized_.
   serialized_.reset();

@@ -192,7 +192,8 @@ class QUIC_EXPORT_PRIVATE QuicSpdyStream : public QuicStream {
       QuicIOVector iov,
       QuicStreamOffset offset,
       bool fin,
-      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener)
+      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+      QuicConnection* connection)
       override;
 
   void set_headers_decompressed(bool val) { headers_decompressed_ = val; }

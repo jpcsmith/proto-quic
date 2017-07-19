@@ -1649,7 +1649,9 @@ void QuicStreamFactory::InitializeCachedStateInCryptoConfig(
   if (!server_info || !server_info->Load())
     return;
 
-  cached->Initialize(server_info->state().server_config,
+  // Not used, so we can send invalid (nullptr) QuicConnection object.
+  cached->Initialize(nullptr,
+                     server_info->state().server_config,
                      server_info->state().source_address_token,
                      server_info->state().certs, server_info->state().cert_sct,
                      server_info->state().chlo_hash,

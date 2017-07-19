@@ -169,7 +169,7 @@ void QuicClientBase::StartConnect() {
   // session.
   set_writer(writer);
   session()->Initialize();
-  session()->CryptoConnect();
+  session()->CryptoConnect(session()->InitialConnection());
   set_connected_or_attempting_connect(true);
 }
 

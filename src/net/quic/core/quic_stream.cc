@@ -40,10 +40,12 @@ size_t GetReceivedFlowControlWindow(QuicSession* session) {
 
 QuicStream::PendingData::PendingData(
     string data_in,
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener)
+    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+    QuicConnection* connection)
     : data(std::move(data_in)),
       offset(0),
-      ack_listener(std::move(ack_listener)) {}
+      ack_listener(std::move(ack_listener)),
+      connection(connection) {}
 
 QuicStream::PendingData::~PendingData() {}
 
@@ -82,7 +84,7 @@ QuicStream::~QuicStream() {}
 
 void QuicStream::SetFromConfig() {}
 
-void QuicStream::OnStreamFrame(const QuicStreamFrame& frame) {
+void QuicStream::OnStreamFrame(const QuicStreamFrame& frame, QuicConnection *connection) {
   DCHECK_EQ(frame.stream_id, id_);
 
   DCHECK(!(read_side_closed_ && write_side_closed_));
@@ -121,7 +123,7 @@ void QuicStream::OnStreamFrame(const QuicStreamFrame& frame) {
     }
   }
 
-  sequencer_.OnStreamFrame(frame);
+  sequencer_.OnStreamFrame(frame, connection);
 }
 
 int QuicStream::num_frames_received() const {
@@ -182,7 +184,8 @@ void QuicStream::CloseConnectionWithDetails(QuicErrorCode error,
 void QuicStream::WriteOrBufferData(
     QuicStringPiece data,
     bool fin,
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
+    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+    QuicConnection* connection) {
   if (data.empty() && !fin) {
     QUIC_BUG << "data.empty() && !fin";
     return;
@@ -203,7 +206,7 @@ void QuicStream::WriteOrBufferData(
 
   if (queued_data_.empty()) {
     struct iovec iov(MakeIovec(data));
-    consumed_data = WritevData(&iov, 1, fin, ack_listener);
+    consumed_data = WritevData(&iov, 1, fin, ack_listener, connection);
     DCHECK_LE(consumed_data.bytes_consumed, data.length());
   }
 
@@ -212,7 +215,7 @@ void QuicStream::WriteOrBufferData(
       (fin && !consumed_data.fin_consumed)) {
     QuicStringPiece remainder(data.substr(consumed_data.bytes_consumed));
     queued_data_bytes_ += remainder.size();
-    queued_data_.emplace_back(remainder.as_string(), ack_listener);
+    queued_data_.emplace_back(remainder.as_string(), ack_listener, connection);
   }
 }
 
@@ -222,6 +225,7 @@ void QuicStream::OnCanWrite() {
     PendingData* pending_data = &queued_data_.front();
     QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener =
         pending_data->ack_listener;
+    QuicConnection* connection = pending_data->connection;
     if (queued_data_.size() == 1 && fin_buffered_) {
       fin = true;
     }
@@ -237,7 +241,7 @@ void QuicStream::OnCanWrite() {
     struct iovec iov = {
         const_cast<char*>(pending_data->data.data()) + pending_data->offset,
         remaining_len};
-    QuicConsumedData consumed_data = WritevData(&iov, 1, fin, ack_listener);
+    QuicConsumedData consumed_data = WritevData(&iov, 1, fin, ack_listener, connection);
     queued_data_bytes_ -= consumed_data.bytes_consumed;
     if (consumed_data.bytes_consumed == remaining_len &&
         fin == consumed_data.fin_consumed) {
@@ -271,7 +275,8 @@ QuicConsumedData QuicStream::WritevData(
     const struct iovec* iov,
     int iov_count,
     bool fin,
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
+    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+    QuicConnection* connection) {
   if (write_side_closed_) {
     QUIC_DLOG(ERROR) << ENDPOINT << "Stream " << id()
                      << "attempting to write when the write side is closed";
@@ -319,7 +324,8 @@ QuicConsumedData QuicStream::WritevData(
 
   QuicConsumedData consumed_data =
       WritevDataInner(QuicIOVector(iov, iov_count, write_length),
-                      stream_bytes_written_, fin, std::move(ack_listener));
+                      stream_bytes_written_, fin, std::move(ack_listener),
+                      connection);
   stream_bytes_written_ += consumed_data.bytes_consumed;
 
   AddBytesSent(consumed_data.bytes_consumed);
@@ -356,13 +362,14 @@ QuicConsumedData QuicStream::WritevDataInner(
     QuicIOVector iov,
     QuicStreamOffset offset,
     bool fin,
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
+    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+    QuicConnection* connection) {
   StreamSendingState state = fin ? FIN : NO_FIN;
   if (fin && add_random_padding_after_fin_) {
     state = FIN_AND_PADDING;
   }
   return session()->WritevData(this, id(), iov, offset, state,
-                               std::move(ack_listener));
+                               std::move(ack_listener), connection);
 }
 
 void QuicStream::CloseReadSide() {

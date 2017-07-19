@@ -27,7 +27,7 @@ public:
   virtual ~QuicConnectionManagerVisitorInterface() {}
 
   // A simple visitor interface for dealing with a data frame.
-  virtual void OnStreamFrame(const QuicStreamFrame& frame) = 0;
+  virtual void OnStreamFrame(const QuicStreamFrame& frame, QuicConnection* connection) = 0;
 
   // The session should process the WINDOW_UPDATE frame, adjusting both stream
   // and connection level flow control windows.
@@ -91,6 +91,9 @@ public:
   // Called to ask if any streams are open in this visitor, excluding the
   // reserved crypto and headers stream.
   virtual bool HasOpenDynamicStreams() const = 0;
+
+  // Called to start sending crypto handshakes on this connection.
+  virtual void StartCryptoConnect(QuicConnection* connection) = 0;
 };
 
 class QUIC_EXPORT_PRIVATE QuicConnectionManager: public QuicConnectionVisitorInterface {
@@ -167,7 +170,8 @@ public:
       QuicIOVector iov,
       QuicStreamOffset offset,
       StreamSendingState state,
-      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
+      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+      QuicConnection* connection);
   virtual void SendRstStream(QuicStreamId id,
                              QuicRstStreamErrorCode error,
                              QuicStreamOffset bytes_written);

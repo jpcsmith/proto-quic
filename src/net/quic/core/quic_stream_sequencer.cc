@@ -36,7 +36,8 @@ QuicStreamSequencer::QuicStreamSequencer(QuicStream* quic_stream,
 
 QuicStreamSequencer::~QuicStreamSequencer() {}
 
-void QuicStreamSequencer::OnStreamFrame(const QuicStreamFrame& frame) {
+void QuicStreamSequencer::OnStreamFrame(const QuicStreamFrame& frame,
+                                        QuicConnection* connection) {
   ++num_frames_received_;
   const QuicStreamOffset byte_offset = frame.offset;
   const size_t data_len = frame.data_length;
@@ -116,6 +117,11 @@ bool QuicStreamSequencer::MaybeCloseStream() {
   }
   buffered_frames_.Clear();
   return true;
+}
+
+int QuicStreamSequencer::GetReadableRegion(iovec* iov, QuicStreamSequencerBuffer::FrameInfo *fi) const {
+  DCHECK(!blocked_);
+  return buffered_frames_.GetReadableRegion(iov, fi);
 }
 
 int QuicStreamSequencer::GetReadableRegions(iovec* iov, size_t iov_len) const {

@@ -5,6 +5,8 @@
 #include "net/quic/core/quic_crypto_server_stream.h"
 
 #include <memory>
+#include <numeric>
+#include <algorithm>
 
 #include "net/quic/core/crypto/crypto_protocol.h"
 #include "net/quic/core/crypto/crypto_utils.h"
@@ -24,37 +26,6 @@ using std::string;
 
 namespace net {
 
-class QuicCryptoServerStream::ProcessClientHelloCallback
-    : public ProcessClientHelloResultCallback {
- public:
-  ProcessClientHelloCallback(
-      QuicCryptoServerStream* stream,
-      const QuicReferenceCountedPointer<
-          ValidateClientHelloResultCallback::Result>& result)
-      : stream_(stream), result_(result) {}
-
-  void Run(QuicErrorCode error,
-           const string& error_details,
-           std::unique_ptr<CryptoHandshakeMessage> message,
-           std::unique_ptr<DiversificationNonce> diversification_nonce,
-           std::unique_ptr<net::ProofSource::Details> proof_source_details)
-      override {
-    if (stream_ == nullptr) {
-      return;
-    }
-
-    stream_->FinishProcessingHandshakeMessageAfterProcessClientHello(
-        *result_, error, error_details, std::move(message),
-        std::move(diversification_nonce), std::move(proof_source_details));
-  }
-
-  void Cancel() { stream_ = nullptr; }
-
- private:
-  QuicCryptoServerStream* stream_;
-  QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
-      result_;
-};
 
 QuicCryptoServerStreamBase::QuicCryptoServerStreamBase(QuicSession* session)
     : QuicCryptoStream(session) {}
@@ -90,48 +61,112 @@ QuicCryptoServerStream::QuicCryptoServerStream(
       compressed_certs_cache_(compressed_certs_cache),
       signed_config_(new QuicSignedServerConfig),
       helper_(helper),
-      num_handshake_messages_(0),
-      num_handshake_messages_with_server_nonces_(0),
-      send_server_config_update_cb_(nullptr),
-      num_server_config_update_messages_sent_(0),
       use_stateless_rejects_if_peer_supported_(
           use_stateless_rejects_if_peer_supported),
-      peer_supports_stateless_rejects_(false),
-      zero_rtt_attempted_(false),
-      chlo_packet_size_(0),
-      validate_client_hello_cb_(nullptr),
-      process_client_hello_cb_(nullptr) {
+      peer_supports_stateless_rejects_(false){
   DCHECK_EQ(Perspective::IS_SERVER, session->AnyConnection()->perspective());
+  AddConnectionState(session->InitialConnection());
 }
 
 QuicCryptoServerStream::~QuicCryptoServerStream() {
   CancelOutstandingCallbacks();
 }
 
+void QuicCryptoServerStream::AddConnectionState(QuicConnection* connection) {
+  QuicCryptoStream::AddConnectionState(connection,
+      new QuicCryptoServerStreamConnectionState(connection, this));
+}
+
+QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
+QuicCryptoServerStreamConnectionState(QuicConnection* connection,
+                  QuicCryptoServerStream* stream) :
+                  QuicCryptoStreamConnectionState(connection),
+                  num_handshake_messages_(0),
+                  num_handshake_messages_with_server_nonces_(0),
+                  send_server_config_update_cb_(nullptr),
+                  num_server_config_update_messages_sent_(0),
+                  zero_rtt_attempted_(false),
+                  validate_client_hello_cb_(nullptr),
+                  process_client_hello_cb_(nullptr),
+                  stream_(stream),
+                  chlo_packet_size_(0)  {
+}
+
+QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
+~QuicCryptoServerStreamConnectionState() {
+  if (validate_client_hello_cb_) {
+    validate_client_hello_cb_->Cancel();
+  }
+  if (process_client_hello_cb_) {
+    process_client_hello_cb_->Cancel();
+  }
+  if (send_server_config_update_cb_) {
+    send_server_config_update_cb_->Cancel();
+  }
+}
+
+QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
+ProcessClientHelloCallback::ProcessClientHelloCallback(
+    QuicCryptoServerStreamConnectionState* parent,
+    const QuicReferenceCountedPointer<
+        ValidateClientHelloResultCallback::Result>& result)
+    : parent_(parent), result_(result) {}
+
+QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
+ProcessClientHelloCallback::~ProcessClientHelloCallback() {}
+
+void QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
+ProcessClientHelloCallback::Run(QuicErrorCode error,
+         const std::string& error_details,
+         std::unique_ptr<CryptoHandshakeMessage> message,
+         std::unique_ptr<DiversificationNonce> diversification_nonce,
+         std::unique_ptr<net::ProofSource::Details> proof_source_details)
+    override {
+  if (parent_ == nullptr) {
+    return;
+  }
+
+  parent_->FinishProcessingHandshakeMessageAfterProcessClientHello(
+      *result_, error, error_details, std::move(message),
+      std::move(diversification_nonce), std::move(proof_source_details));
+}
+
+void QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
+ProcessClientHelloCallback::Cancel() { parent_ = nullptr; }
+
 void QuicCryptoServerStream::CancelOutstandingCallbacks() {
   // Detach from the validation callback.  Calling this multiple times is safe.
-  if (validate_client_hello_cb_ != nullptr) {
-    validate_client_hello_cb_->Cancel();
-    validate_client_hello_cb_ = nullptr;
+  for(auto it: connection_states_) {
+    QuicCryptoServerStreamConnectionState* cs = it.second.get();
+  if (cs->validate_client_hello_cb_ != nullptr) {
+    cs->validate_client_hello_cb_->Cancel();
+    cs->validate_client_hello_cb_ = nullptr;
   }
-  if (send_server_config_update_cb_ != nullptr) {
-    send_server_config_update_cb_->Cancel();
-    send_server_config_update_cb_ = nullptr;
+  if (cs->send_server_config_update_cb_ != nullptr) {
+    cs->send_server_config_update_cb_->Cancel();
+    cs->send_server_config_update_cb_ = nullptr;
   }
-  if (process_client_hello_cb_ != nullptr) {
-    process_client_hello_cb_->Cancel();
-    process_client_hello_cb_ = nullptr;
+  if (cs->process_client_hello_cb_ != nullptr) {
+    cs->process_client_hello_cb_->Cancel();
+    cs->process_client_hello_cb_ = nullptr;
+  }
   }
 }
 
 void QuicCryptoServerStream::OnHandshakeMessage(
     const CryptoHandshakeMessage& message) {
   QuicCryptoServerStreamBase::OnHandshakeMessage(message);
-  ++num_handshake_messages_;
-  chlo_packet_size_ = connection()->GetCurrentPacket().length();
+
+  if(connection_states_.find(connection) == connection_states_.end()) {
+    AddConnectionState(connection);
+  }
+  QuicCryptoServerStreamConnectionState* cs = GetConnectionState(message.Connection());
+
+  ++cs->num_handshake_messages_;
+  cs->chlo_packet_size_ = cs->Connection()->GetCurrentPacket().length();
 
   // Do not process handshake messages after the handshake is confirmed.
-  if (handshake_confirmed_) {
+  if (cs->handshake_confirmed_) {
     CloseConnectionWithDetails(QUIC_CRYPTO_MESSAGE_AFTER_HANDSHAKE_COMPLETE,
                                "Unexpected handshake message from client");
     return;
@@ -143,8 +178,8 @@ void QuicCryptoServerStream::OnHandshakeMessage(
     return;
   }
 
-  if (validate_client_hello_cb_ != nullptr ||
-      process_client_hello_cb_ != nullptr) {
+  if (cs->validate_client_hello_cb_ != nullptr ||
+      cs->process_client_hello_cb_ != nullptr) {
     // Already processing some other handshake message.  The protocol
     // does not allow for clients to send multiple handshake messages
     // before the server has a chance to respond.
@@ -157,38 +192,25 @@ void QuicCryptoServerStream::OnHandshakeMessage(
   CryptoUtils::HashHandshakeMessage(message, &chlo_hash_,
                                     Perspective::IS_SERVER);
 
-  std::unique_ptr<ValidateCallback> cb(new ValidateCallback(this));
-  DCHECK(validate_client_hello_cb_ == nullptr);
-  DCHECK(process_client_hello_cb_ == nullptr);
-  validate_client_hello_cb_ = cb.get();
+  std::unique_ptr<ValidateCallback> cb(new ValidateCallback(cs));
+  DCHECK(cs->validate_client_hello_cb_ == nullptr);
+  DCHECK(cs->process_client_hello_cb_ == nullptr);
+  cs->validate_client_hello_cb_ = cb.get();
   crypto_config_->ValidateClientHello(
-      message, GetClientAddress().host(),
-      connection()->self_address(), version(),
-      connection()->clock(), signed_config_, std::move(cb));
+      message, GetClientAddress(cs).host(),
+      cs->Connection()->self_address(), version(),
+      cs->Connection()->clock(), signed_config_, std::move(cb));
 }
 
-void QuicCryptoServerStream::FinishProcessingHandshakeMessage(
+void QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
+FinishProcessingHandshakeMessage(
     QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
         result,
     std::unique_ptr<ProofSource::Details> details) {
-  const CryptoHandshakeMessage& message = result->client_hello;
-
-  // Clear the callback that got us here.
-  DCHECK(validate_client_hello_cb_ != nullptr);
-  DCHECK(process_client_hello_cb_ == nullptr);
-  validate_client_hello_cb_ = nullptr;
-
-  if (use_stateless_rejects_if_peer_supported_) {
-    peer_supports_stateless_rejects_ = DoesPeerSupportStatelessRejects(message);
-  }
-
-  std::unique_ptr<ProcessClientHelloCallback> cb(
-      new ProcessClientHelloCallback(this, result));
-  process_client_hello_cb_ = cb.get();
-  ProcessClientHello(result, std::move(details), std::move(cb));
+  stream_->FinishProcessingHandshakeMessage(this, result, details);
 }
 
-void QuicCryptoServerStream::
+void QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
     FinishProcessingHandshakeMessageAfterProcessClientHello(
         const ValidateClientHelloResultCallback::Result& result,
         QuicErrorCode error,
@@ -196,10 +218,52 @@ void QuicCryptoServerStream::
         std::unique_ptr<CryptoHandshakeMessage> reply,
         std::unique_ptr<DiversificationNonce> diversification_nonce,
         std::unique_ptr<ProofSource::Details> proof_source_details) {
+  stream_->FinishProcessingHandshakeMessageAfterProcessClientHello(
+      this, result, error, error_details, reply, diversification_nonce,
+      proof_source_details);
+}
+
+void QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
+SendServerConfigUpdate(
+    const CachedNetworkParameters* cached_network_params) {
+  stream_->SendServerConfigUpdate(this, cached_network_params);
+}
+
+void QuicCryptoServerStream::FinishProcessingHandshakeMessage(
+    QuicCryptoServerStreamConnectionState* cs,
+    QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
+        result,
+    std::unique_ptr<ProofSource::Details> details) {
+  const CryptoHandshakeMessage& message = result->client_hello;
+
   // Clear the callback that got us here.
-  DCHECK(process_client_hello_cb_ != nullptr);
-  DCHECK(validate_client_hello_cb_ == nullptr);
-  process_client_hello_cb_ = nullptr;
+  DCHECK(cs->validate_client_hello_cb_ != nullptr);
+  DCHECK(cs->process_client_hello_cb_ == nullptr);
+  cs->validate_client_hello_cb_ = nullptr;
+
+  if (use_stateless_rejects_if_peer_supported_) {
+    peer_supports_stateless_rejects_ = DoesPeerSupportStatelessRejects(message);
+  }
+
+  std::unique_ptr<ProcessClientHelloCallback> cb(
+      new ProcessClientHelloCallback(cs, result));
+  cs->process_client_hello_cb_ = cb.get();
+  ProcessClientHello(result, std::move(details), std::move(cb));
+}
+
+void QuicCryptoServerStream::
+    FinishProcessingHandshakeMessageAfterProcessClientHello(
+        QuicCryptoServerStreamConnectionState* cs,
+        const ValidateClientHelloResultCallback::Result& result,
+        QuicErrorCode error,
+        const string& error_details,
+        std::unique_ptr<CryptoHandshakeMessage> reply,
+        std::unique_ptr<DiversificationNonce> diversification_nonce,
+        std::unique_ptr<ProofSource::Details> proof_source_details) {
+  // Clear the callback that got us here.
+  DCHECK(cs->process_client_hello_cb_ != nullptr);
+  DCHECK(cs->validate_client_hello_cb_ == nullptr);
+  cs->process_client_hello_cb_ = nullptr;
 
   const CryptoHandshakeMessage& message = result.client_hello;
   if (error != QUIC_NO_ERROR) {
@@ -214,16 +278,16 @@ void QuicCryptoServerStream::
       // Before sending the SREJ, cause the connection to save crypto packets
       // so that they can be added to the time wait list manager and
       // retransmitted.
-      connection()->EnableSavingCryptoPackets();
+      cs->Connection()->EnableSavingCryptoPackets();
     }
     SendHandshakeMessage(*reply);
 
     if (reply->tag() == kSREJ) {
       DCHECK(use_stateless_rejects_if_peer_supported_);
       DCHECK(peer_supports_stateless_rejects_);
-      DCHECK(!handshake_confirmed());
+      DCHECK(!cs->handshake_confirmed());
       QUIC_DLOG(INFO) << "Closing connection "
-                      << connection()->connection_id()
+                      << cs->Connection()->connection_id()
                       << " because of a stateless reject.";
       session()->CloseConnection(
           QUIC_CRYPTO_HANDSHAKE_STATELESS_REJECT, "stateless reject",
@@ -245,7 +309,7 @@ void QuicCryptoServerStream::
     return;
   }
 
-  session()->OnConfigNegotiated(connection());
+  session()->OnConfigNegotiated(cs->Connection());
 
   config->ToHandshakeMessage(reply.get());
 
@@ -254,72 +318,78 @@ void QuicCryptoServerStream::
   // write key.
   //
   // NOTE: the SHLO will be encrypted with the new server write key.
-  connection()->SetEncrypter(
+  cs->Connection()->SetEncrypter(
       ENCRYPTION_INITIAL,
-      crypto_negotiated_params_->initial_crypters.encrypter.release());
-  connection()->SetDefaultEncryptionLevel(ENCRYPTION_INITIAL);
+      cs->crypto_negotiated_params_->initial_crypters.encrypter.release());
+  cs->Connection()->SetDefaultEncryptionLevel(ENCRYPTION_INITIAL);
   // Set the decrypter immediately so that we no longer accept unencrypted
   // packets.
-  connection()->SetDecrypter(
+  cs->Connection()->SetDecrypter(
       ENCRYPTION_INITIAL,
-      crypto_negotiated_params_->initial_crypters.decrypter.release());
-  connection()->SetDiversificationNonce(*diversification_nonce);
+      cs->crypto_negotiated_params_->initial_crypters.decrypter.release());
+  cs->Connection()->SetDiversificationNonce(*diversification_nonce);
 
   SendHandshakeMessage(*reply);
 
-  connection()->SetEncrypter(
+  cs->Connection()->SetEncrypter(
       ENCRYPTION_FORWARD_SECURE,
-      crypto_negotiated_params_->forward_secure_crypters.encrypter.release());
-  connection()->SetDefaultEncryptionLevel(ENCRYPTION_FORWARD_SECURE);
+      cs->crypto_negotiated_params_->forward_secure_crypters.encrypter.release());
+  cs->Connection()->SetDefaultEncryptionLevel(ENCRYPTION_FORWARD_SECURE);
 
-  connection()->SetAlternativeDecrypter(
+  cs->Connection()->SetAlternativeDecrypter(
       ENCRYPTION_FORWARD_SECURE,
-      crypto_negotiated_params_->forward_secure_crypters.decrypter.release(),
+      cs->crypto_negotiated_params_->forward_secure_crypters.decrypter.release(),
       false /* don't latch */);
 
-  encryption_established_ = true;
-  handshake_confirmed_ = true;
-  session()->OnCryptoHandshakeEvent(connection(), QuicSession::HANDSHAKE_CONFIRMED);
+  cs->encryption_established_ = true;
+  cs->handshake_confirmed_ = true;
+  session()->OnCryptoHandshakeEvent(cs->Connection(), QuicSession::HANDSHAKE_CONFIRMED);
 }
 
-void QuicCryptoServerStream::SendServerConfigUpdate(
+void QuicCryptoServerStream::SendServerConfigUpdate(QuicConnection* connection,
     const CachedNetworkParameters* cached_network_params) {
-  if (!handshake_confirmed_) {
+  DCHECK(GetConnectionState(connection) != nullptr));
+  QuicCryptoServerStreamConnectionState* cs = GetConnectionState(connection);
+
+  if (!cs->handshake_confirmed_) {
     return;
   }
 
-  if (send_server_config_update_cb_ != nullptr) {
+  if (cs->send_server_config_update_cb_ != nullptr) {
     QUIC_DVLOG(1)
         << "Skipped server config update since one is already in progress";
     return;
   }
 
   std::unique_ptr<SendServerConfigUpdateCallback> cb(
-      new SendServerConfigUpdateCallback(this));
-  send_server_config_update_cb_ = cb.get();
+      new SendServerConfigUpdateCallback(cs));
+  cs->send_server_config_update_cb_ = cb.get();
 
   crypto_config_->BuildServerConfigUpdateMessage(
-      connection()->version(), chlo_hash_,
-      previous_source_address_tokens_, connection()->self_address(),
-      GetClientAddress().host(), connection()->clock(),
-      connection()->random_generator(), compressed_certs_cache_,
-      *crypto_negotiated_params_, cached_network_params,
+      cs->Connection()->version(), chlo_hash_,
+      cs->previous_source_address_tokens_, cs->Connection()->self_address(),
+      GetClientAddress(cs).host(), cs->Connection()->clock(),
+      cs->Connection()->random_generator(), compressed_certs_cache_,
+      *cs->crypto_negotiated_params_, cached_network_params,
       (session()->config()->HasReceivedConnectionOptions()
            ? session()->config()->ReceivedConnectionOptions()
            : QuicTagVector()),
       std::move(cb));
 }
 
-QuicCryptoServerStream::SendServerConfigUpdateCallback::
-    SendServerConfigUpdateCallback(QuicCryptoServerStream* parent)
+QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
+SendServerConfigUpdateCallback::SendServerConfigUpdateCallback(
+    QuicCryptoServerStreamConnectionState* parent)
     : parent_(parent) {}
 
-void QuicCryptoServerStream::SendServerConfigUpdateCallback::Cancel() {
+void QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
+SendServerConfigUpdateCallback::Cancel() {
   parent_ = nullptr;
 }
 
 // From BuildServerConfigUpdateMessageResultCallback
-void QuicCryptoServerStream::SendServerConfigUpdateCallback::Run(
+void QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::
+SendServerConfigUpdateCallback::Run(
     bool ok,
     const CryptoHandshakeMessage& message) {
   if (parent_ == nullptr) {
@@ -329,11 +399,12 @@ void QuicCryptoServerStream::SendServerConfigUpdateCallback::Run(
 }
 
 void QuicCryptoServerStream::FinishSendServerConfigUpdate(
+    QuicCryptoServerStreamConnectionState* cs,
     bool ok,
     const CryptoHandshakeMessage& message) {
   // Clear the callback that got us here.
-  DCHECK(send_server_config_update_cb_ != nullptr);
-  send_server_config_update_cb_ = nullptr;
+  DCHECK(cs->send_server_config_update_cb_ != nullptr);
+  cs->send_server_config_update_cb_ = nullptr;
 
   if (!ok) {
     QUIC_DVLOG(1) << "Server: Failed to build server config update (SCUP)!";
@@ -344,26 +415,48 @@ void QuicCryptoServerStream::FinishSendServerConfigUpdate(
                 << message.DebugString(Perspective::IS_SERVER);
   const QuicData& data = message.GetSerialized(Perspective::IS_SERVER);
   WriteOrBufferData(QuicStringPiece(data.data(), data.length()), false,
-                    nullptr);
+                    nullptr, cs->Connection());
 
-  ++num_server_config_update_messages_sent_;
+  ++cs->num_server_config_update_messages_sent_;
 }
 
 uint8_t QuicCryptoServerStream::NumHandshakeMessages() const {
-  return num_handshake_messages_;
+  return std::accumulate(
+      connection_states_.begin(),connection_states_.end(),
+      0,
+      [](const size_t previous,
+         const std::pair<QuicConnection*,
+         std::unique_ptr<QuicCryptoServerStreamConnectionState*>>& p) {
+    return previous+p.second->num_handshake_messages_;
+  });
 }
 
 uint8_t QuicCryptoServerStream::NumHandshakeMessagesWithServerNonces() const {
-  return num_handshake_messages_with_server_nonces_;
+  return std::accumulate(
+      connection_states_.begin(),connection_states_.end(),
+      0,
+      [](const size_t previous,
+         const std::pair<QuicConnection*,
+         std::unique_ptr<QuicCryptoServerStreamConnectionState*>>& p) {
+    return previous+p.second->num_handshake_messages_with_server_nonces_;
+  });
 }
 
 int QuicCryptoServerStream::NumServerConfigUpdateMessagesSent() const {
-  return num_server_config_update_messages_sent_;
+  return std::accumulate(
+      connection_states_.begin(),connection_states_.end(),
+      0,
+      [](const size_t previous,
+         const std::pair<QuicConnection*,
+         std::unique_ptr<QuicCryptoServerStreamConnectionState*>>& p) {
+    return previous+p.second->num_server_config_update_messages_sent_;
+  });
 }
 
 const CachedNetworkParameters*
-QuicCryptoServerStream::PreviousCachedNetworkParams() const {
-  return previous_cached_network_params_.get();
+QuicCryptoServerStream::PreviousCachedNetworkParams(QuicConnection* connection) const {
+  QuicCryptoServerStreamConnectionState* cs = GetConnectionState(connection);
+  return cs->previous_cached_network_params_.get();
 }
 
 bool QuicCryptoServerStream::UseStatelessRejectsIfPeerSupported() const {
@@ -375,7 +468,12 @@ bool QuicCryptoServerStream::PeerSupportsStatelessRejects() const {
 }
 
 bool QuicCryptoServerStream::ZeroRttAttempted() const {
-  return zero_rtt_attempted_;
+  return std::any_of(
+      connection_states_.begin(),connection_states_.end(),
+      [](const std::pair<QuicConnection*,
+         std::unique_ptr<QuicCryptoServerStreamConnectionState*>>& p) {
+    return p.second->zero_rtt_attempted_;
+  });
 }
 
 void QuicCryptoServerStream::SetPeerSupportsStatelessRejects(
@@ -384,19 +482,21 @@ void QuicCryptoServerStream::SetPeerSupportsStatelessRejects(
 }
 
 void QuicCryptoServerStream::SetPreviousCachedNetworkParams(
-    CachedNetworkParameters cached_network_params) {
-  previous_cached_network_params_.reset(
+    QuicConnection* connection, CachedNetworkParameters cached_network_params) {
+  QuicCryptoServerStreamConnectionState* cs = GetConnectionState(connection);
+  return cs->previous_cached_network_params_.reset(
       new CachedNetworkParameters(cached_network_params));
 }
 
 bool QuicCryptoServerStream::GetBase64SHA256ClientChannelID(
-    string* output) const {
-  if (!encryption_established_ ||
-      crypto_negotiated_params_->channel_id.empty()) {
+    QuicConnection* connection, string* output) const {
+  QuicCryptoServerStreamConnectionState* cs = GetConnectionState(connection);
+  if (!cs->encryption_established_ ||
+      cs->crypto_negotiated_params_->channel_id.empty()) {
     return false;
   }
 
-  const string& channel_id(crypto_negotiated_params_->channel_id);
+  const string& channel_id(cs->crypto_negotiated_params_->channel_id);
   uint8_t digest[SHA256_DIGEST_LENGTH];
   SHA256(reinterpret_cast<const uint8_t*>(channel_id.data()), channel_id.size(),
          digest);
@@ -406,6 +506,7 @@ bool QuicCryptoServerStream::GetBase64SHA256ClientChannelID(
 }
 
 void QuicCryptoServerStream::ProcessClientHello(
+    QuicCryptoServerStreamConnectionState* cs,
     QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
         result,
     std::unique_ptr<ProofSource::Details> proof_source_details,
@@ -413,55 +514,55 @@ void QuicCryptoServerStream::ProcessClientHello(
   const CryptoHandshakeMessage& message = result->client_hello;
   string error_details;
   if (!helper_->CanAcceptClientHello(
-          message, connection()->self_address(), &error_details)) {
+          message, cs->Connection()->self_address(), &error_details)) {
     done_cb->Run(QUIC_HANDSHAKE_FAILED, error_details, nullptr, nullptr,
                  nullptr);
     return;
   }
   if (!result->info.server_nonce.empty()) {
-    ++num_handshake_messages_with_server_nonces_;
+    ++cs->num_handshake_messages_with_server_nonces_;
   }
 
-  if (num_handshake_messages_ == 1) {
+  if (cs->num_handshake_messages_ == 1) {
     // Client attempts zero RTT handshake by sending a non-inchoate CHLO.
     QuicStringPiece public_value;
-    zero_rtt_attempted_ = message.GetStringPiece(kPUBS, &public_value);
+    cs->zero_rtt_attempted_ = message.GetStringPiece(kPUBS, &public_value);
   }
 
   // Store the bandwidth estimate from the client.
   if (result->cached_network_params.bandwidth_estimate_bytes_per_second() > 0) {
-    previous_cached_network_params_.reset(
+    cs->previous_cached_network_params_.reset(
         new CachedNetworkParameters(result->cached_network_params));
   }
-  previous_source_address_tokens_ = result->info.source_address_tokens;
+  cs->previous_source_address_tokens_ = result->info.source_address_tokens;
 
   const bool use_stateless_rejects_in_crypto_config =
       use_stateless_rejects_if_peer_supported_ &&
       peer_supports_stateless_rejects_;
   const QuicConnectionId server_designated_connection_id =
-      GenerateConnectionIdForReject(use_stateless_rejects_in_crypto_config);
+      GenerateConnectionIdForReject(cs, use_stateless_rejects_in_crypto_config);
   crypto_config_->ProcessClientHello(
-      result, /*reject_only=*/false, connection()->connection_id(),
-      connection()->self_address(), GetClientAddress(), version(),
-      connection()->supported_versions(), use_stateless_rejects_in_crypto_config,
-      server_designated_connection_id, connection()->clock(),
-      connection()->random_generator(), compressed_certs_cache_,
-      crypto_negotiated_params_, signed_config_,
+      result, /*reject_only=*/false, cs->Connection()->connection_id(),
+      cs->Connection()->self_address(), GetClientAddress(cs), version(),
+      cs->Connection()->supported_versions(), use_stateless_rejects_in_crypto_config,
+      server_designated_connection_id, cs->Connection()->clock(),
+      cs->Connection()->random_generator(), compressed_certs_cache_,
+      cs->crypto_negotiated_params_, signed_config_,
       QuicCryptoStream::CryptoMessageFramingOverhead(version()),
-      chlo_packet_size_, std::move(done_cb));
+      cs->chlo_packet_size_, std::move(done_cb));
 }
 
 void QuicCryptoServerStream::OverrideQuicConfigDefaults(QuicConfig* config) {}
 
-QuicCryptoServerStream::ValidateCallback::ValidateCallback(
-    QuicCryptoServerStream* parent)
+QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::ValidateCallback::
+ValidateCallback(QuicCryptoServerStreamConnectionState* parent)
     : parent_(parent) {}
 
-void QuicCryptoServerStream::ValidateCallback::Cancel() {
+void QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::ValidateCallback::Cancel() {
   parent_ = nullptr;
 }
 
-void QuicCryptoServerStream::ValidateCallback::Run(
+void QuicCryptoServerStream::QuicCryptoServerStreamConnectionState::ValidateCallback::Run(
     QuicReferenceCountedPointer<Result> result,
     std::unique_ptr<ProofSource::Details> details) {
   if (parent_ != nullptr) {
@@ -471,16 +572,18 @@ void QuicCryptoServerStream::ValidateCallback::Run(
 }
 
 QuicConnectionId QuicCryptoServerStream::GenerateConnectionIdForReject(
+    QuicCryptoServerStreamConnectionState* cs,
     bool use_stateless_rejects) {
   if (!use_stateless_rejects) {
     return 0;
   }
   return helper_->GenerateConnectionIdForReject(
-      connection()->connection_id());
+      cs->Connection()->connection_id());
 }
 
-const QuicSocketAddress QuicCryptoServerStream::GetClientAddress() {
-  return connection()->peer_address();
+const QuicSocketAddress QuicCryptoServerStream::GetClientAddress(
+    QuicCryptoServerStreamConnectionState* cs) {
+  return cs->Connection()->peer_address();
 }
 
 }  // namespace net

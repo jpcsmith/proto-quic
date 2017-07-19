@@ -84,9 +84,9 @@ const QuicCryptoClientStreamBase* QuicClientSession::GetCryptoStream() const {
   return crypto_stream_.get();
 }
 
-void QuicClientSession::CryptoConnect() {
+void QuicClientSession::CryptoConnect(QuicConnection* connection) {
   DCHECK(flow_controller());
-  crypto_stream_->CryptoConnect();
+  crypto_stream_->CryptoConnect(connection);
 }
 
 int QuicClientSession::GetNumSentClientHellos() const {

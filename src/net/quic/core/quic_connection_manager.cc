@@ -73,8 +73,12 @@ QuicConsumedData QuicConnectionManager::SendStreamData(
     QuicIOVector iov,
     QuicStreamOffset offset,
     StreamSendingState state,
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
-  return CurrentConnection()->SendStreamData(id,iov,offset,state,ack_listener);
+    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+    QuicConnection* connection) {
+  if(connection == nullptr) {
+    connection = CurrentConnection();
+  }
+  return connection->SendStreamData(id,iov,offset,state,ack_listener);
 }
 
 
@@ -200,6 +204,10 @@ void QuicConnectionManager::OpenConnection(QuicSubflowDescriptor descriptor, Qui
   }
 
   AddConnection(descriptor,subflowId,connection);
+
+  if(direction == SUBFLOW_OUTGOING) {
+    visitor_->StartCryptoConnect(connection);
+  }
 }
 
 void QuicConnectionManager::AddConnection(QuicSubflowDescriptor descriptor, QuicSubflowId subflowId, QuicConnection *connection) {
@@ -299,7 +307,7 @@ void QuicConnectionManager::OnHandshakeComplete() {
 }
 
 void QuicConnectionManager::OnStreamFrame(const QuicSubflowId& subflowId, const QuicStreamFrame& frame) {
-  if(visitor_) visitor_->OnStreamFrame(frame);
+  if(visitor_) visitor_->OnStreamFrame(frame, connections_[subflowId]);
 }
 void QuicConnectionManager::OnWindowUpdateFrame(const QuicSubflowId& subflowId, const QuicWindowUpdateFrame& frame) {
   if(visitor_) visitor_->OnWindowUpdateFrame(frame);

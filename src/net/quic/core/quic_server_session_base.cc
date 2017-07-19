@@ -64,7 +64,7 @@ void QuicServerSessionBase::OnConfigNegotiated(QuicConnection *connection) {
   // region as this server, then decide whether to use the data for bandwidth
   // resumption.
   const CachedNetworkParameters* cached_network_params =
-      crypto_stream_->PreviousCachedNetworkParams();
+      crypto_stream_->PreviousCachedNetworkParams(connection);
   if (cached_network_params != nullptr &&
       cached_network_params->serving_region() == serving_region_) {
     // Log the received connection parameters, regardless of how they

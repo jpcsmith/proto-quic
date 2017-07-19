@@ -28,6 +28,7 @@ class CryptoHandshakeMessage;
 class ProofVerifier;
 class ProofVerifyDetails;
 class QuicRandom;
+class QuicConnection;
 
 // QuicCryptoClientConfig contains crypto-related configuration settings for a
 // client. Note that this object isn't thread-safe. It's designed to be used on
@@ -107,7 +108,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
     void SetProofInvalid();
 
     const std::string& server_config() const;
-    const std::string& source_address_token() const;
+    const std::string& source_address_token(QuicConnection* connection) const;
     const std::vector<std::string>& certs() const;
     const std::string& cert_sct() const;
     const std::string& chlo_hash() const;
@@ -116,7 +117,8 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
     uint64_t generation_counter() const;
     const ProofVerifyDetails* proof_verify_details() const;
 
-    void set_source_address_token(QuicStringPiece token);
+    void set_source_address_token(QuicConnection* connection,
+        QuicStringPiece token);
 
     void set_cert_sct(QuicStringPiece cert_sct);
 
@@ -157,7 +159,8 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
 
     // Initializes this cached state based on the arguments provided.
     // Returns false if there is a problem parsing the server config.
-    bool Initialize(QuicStringPiece server_config,
+    bool Initialize(QuicConnection* connection,
+                    QuicStringPiece server_config,
                     QuicStringPiece source_address_token,
                     const std::vector<std::string>& certs,
                     const std::string& cert_sct,
@@ -168,7 +171,8 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
 
    private:
     std::string server_config_;         // A serialized handshake message.
-    std::string source_address_token_;  // An opaque proof of IP ownership.
+    std::map<QuicConnection*, std::string> source_address_tokens_; // An opaque
+                                        // proof of IP ownership.
     std::vector<std::string> certs_;    // A list of certificates in leaf-first
                                         // order.
     std::string cert_sct_;              // Signed timestamp of the leaf cert.

@@ -228,7 +228,7 @@ void QuicCryptoClientConfig::CachedState::SetProof(
 
 void QuicCryptoClientConfig::CachedState::Clear() {
   server_config_.clear();
-  source_address_token_.clear();
+  source_address_tokens_.clear();
   certs_.clear();
   cert_sct_.clear();
   chlo_hash_.clear();
@@ -260,6 +260,7 @@ void QuicCryptoClientConfig::CachedState::SetProofInvalid() {
 }
 
 bool QuicCryptoClientConfig::CachedState::Initialize(
+    QuicConnection* connection,
     QuicStringPiece server_config,
     QuicStringPiece source_address_token,
     const std::vector<string>& certs,
@@ -286,8 +287,9 @@ bool QuicCryptoClientConfig::CachedState::Initialize(
 
   chlo_hash_.assign(chlo_hash.data(), chlo_hash.size());
   server_config_sig_.assign(signature.data(), signature.size());
-  source_address_token_.assign(source_address_token.data(),
-                               source_address_token.size());
+  source_address_tokens_.clear();
+  source_address_tokens_[connection].assign(source_address_token.data(),
+                                            source_address_token.size());
   certs_ = certs;
   cert_sct_ = cert_sct;
   return true;
@@ -297,9 +299,9 @@ const string& QuicCryptoClientConfig::CachedState::server_config() const {
   return server_config_;
 }
 
-const string& QuicCryptoClientConfig::CachedState::source_address_token()
-    const {
-  return source_address_token_;
+const string& QuicCryptoClientConfig::CachedState::source_address_token(
+    QuicConnection* connection) const {
+  return source_address_tokens_.find(connection)->second;
 }
 
 const std::vector<string>& QuicCryptoClientConfig::CachedState::certs() const {
@@ -332,8 +334,8 @@ QuicCryptoClientConfig::CachedState::proof_verify_details() const {
 }
 
 void QuicCryptoClientConfig::CachedState::set_source_address_token(
-    QuicStringPiece token) {
-  source_address_token_ = token.as_string();
+    QuicConnection* connection, QuicStringPiece token) {
+  source_address_tokens_[connection] = token.as_string();
 }
 
 void QuicCryptoClientConfig::CachedState::set_cert_sct(
@@ -351,7 +353,7 @@ void QuicCryptoClientConfig::CachedState::InitializeFrom(
   DCHECK(server_config_.empty());
   DCHECK(!server_config_valid_);
   server_config_ = other.server_config_;
-  source_address_token_ = other.source_address_token_;
+  source_address_tokens_ = other.source_address_tokens_;
   certs_ = other.certs_;
   cert_sct_ = other.cert_sct_;
   chlo_hash_ = other.chlo_hash_;
@@ -453,8 +455,9 @@ void QuicCryptoClientConfig::FillInchoateClientHello(
     }
   }
 
-  if (!cached->source_address_token().empty()) {
-    out->SetStringPiece(kSourceAddressTokenTag, cached->source_address_token());
+  if (!cached->source_address_token(scfg->Connection()).empty()) {
+    out->SetStringPiece(kSourceAddressTokenTag,
+        cached->source_address_token(scfg->Connection()));
   }
 
   if (!demand_x509_proof) {
@@ -758,7 +761,7 @@ QuicErrorCode QuicCryptoClientConfig::CacheNewServerConfig(
 
   QuicStringPiece token;
   if (message.GetStringPiece(kSourceAddressTokenTag, &token)) {
-    cached->set_source_address_token(token);
+    cached->set_source_address_token(message.Connection(), token);
   }
 
   QuicStringPiece proof, cert_bytes, cert_sct;
@@ -858,7 +861,7 @@ QuicErrorCode QuicCryptoClientConfig::ProcessServerHello(
   // Learn about updated source address tokens.
   QuicStringPiece token;
   if (server_hello.GetStringPiece(kSourceAddressTokenTag, &token)) {
-    cached->set_source_address_token(token);
+    cached->set_source_address_token(server_hello.Connection(), token);
   }
 
   QuicStringPiece shlo_nonce;
