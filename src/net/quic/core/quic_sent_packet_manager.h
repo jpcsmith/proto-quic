@@ -85,6 +85,13 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
     virtual void OnPathMtuIncreased(QuicPacketLength packet_size) = 0;
   };
 
+  class QUIC_EXPORT_PRIVATE RetransmissionVisitor {
+    public:
+      virtual ~RetransmissionVisitor() {}
+
+      virtual void OnRetransmission(const QuicTransmissionInfo& transmission_info) = 0;
+  };
+
   QuicSentPacketManager(Perspective perspective,
                         const QuicClock* clock,
                         QuicConnectionStats* stats,
@@ -93,6 +100,11 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
   virtual ~QuicSentPacketManager();
 
   virtual void SetFromConfig(const QuicConfig& config);
+
+  // This visitor is called whenever a non-crypto packet is about to be
+  // scheduled as a retransmission. This allows for retransmissions on
+  // different subflows.
+  void SetRetransmissionVisitor(RetransmissionVisitor* visitor) { retransmission_visitor_ = visitor; }
 
   // Pass the CachedNetworkParameters to the send algorithm.
   void ResumeConnectionState(
@@ -410,6 +422,8 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
 
   // The largest acked value that was sent in an ack, which has then been acked.
   QuicPacketNumber largest_packet_peer_knows_is_acked_;
+
+  RetransmissionVisitor* retransmission_visitor_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicSentPacketManager);
 };

@@ -1412,19 +1412,6 @@ component("net") {
       "quic/platform/impl/quic_url_impl.h",
       "quic/platform/impl/quic_url_utils_impl.cc",
       "quic/platform/impl/quic_url_utils_impl.h",
-      "quic/quartc/quartc_clock_interface.h",
-      "quic/quartc/quartc_factory.cc",
-      "quic/quartc/quartc_factory.h",
-      "quic/quartc/quartc_factory_interface.h",
-      "quic/quartc/quartc_packet_writer.cc",
-      "quic/quartc/quartc_packet_writer.h",
-      "quic/quartc/quartc_session.cc",
-      "quic/quartc/quartc_session.h",
-      "quic/quartc/quartc_session_interface.h",
-      "quic/quartc/quartc_stream.cc",
-      "quic/quartc/quartc_stream.h",
-      "quic/quartc/quartc_stream_interface.h",
-      "quic/quartc/quartc_task_runner_interface.h",
       "reporting/reporting_browsing_data_remover.cc",
       "reporting/reporting_browsing_data_remover.h",
       "reporting/reporting_cache.cc",
@@ -2920,6 +2907,39 @@ if (is_linux) {
     ]
   }
 
+  source_set("epoll_multipath_quic_tools") {
+    sources = [
+      "tools/quic/platform/impl/quic_epoll_clock.cc",
+      "tools/quic/platform/impl/quic_epoll_clock.h",
+      "tools/quic/platform/impl/quic_socket_utils.cc",
+      "tools/quic/platform/impl/quic_socket_utils.h",
+      "tools/quic/quic_multipath_client.cc",
+      "tools/quic/quic_multipath_client.h",
+      "tools/quic/quic_multipath_server.cc",
+      "tools/quic/quic_multipath_server.h",
+      "tools/quic/quic_default_packet_writer.cc",
+      "tools/quic/quic_default_packet_writer.h",
+      "tools/quic/quic_epoll_alarm_factory.cc",
+      "tools/quic/quic_epoll_alarm_factory.h",
+      "tools/quic/quic_epoll_connection_helper.cc",
+      "tools/quic/quic_epoll_connection_helper.h",
+      "tools/quic/quic_packet_reader.cc",
+      "tools/quic/quic_packet_reader.h",
+      "tools/quic/quic_packet_writer_wrapper.cc",
+      "tools/quic/quic_packet_writer_wrapper.h",
+    ]
+    deps = [
+      ":epoll_server",
+      ":net",
+      ":simple_multipath_quic_tools",
+      "//base",
+      "//base/third_party/dynamic_annotations",
+      "//crypto",
+      "//third_party/boringssl",
+      "//url",
+    ]
+  }
+
   source_set("epoll_quic_tools") {
     sources = [
       "tools/quic/platform/impl/quic_epoll_clock.cc",
@@ -2992,10 +3012,10 @@ if (is_linux) {
       "tools/quic/quic_multipath_client_bin.cc",
     ]
     deps = [
-      ":epoll_quic_tools",
+      ":epoll_multipath_quic_tools",
       ":epoll_server",
       ":net",
-      ":simple_quic_tools",
+      ":simple_multipath_quic_tools",
       "//base",
       "//build/config:exe_and_shlib_deps",
       "//third_party/boringssl",
@@ -3007,10 +3027,10 @@ if (is_linux) {
       "tools/quic/quic_multipath_server_bin.cc",
     ]
     deps = [
-      ":epoll_quic_tools",
+      ":epoll_multipath_quic_tools",
       ":epoll_server",
       ":net",
-      ":simple_quic_tools",
+      ":simple_multipath_quic_tools",
       "//base",
       "//build/config:exe_and_shlib_deps",
       "//third_party/boringssl",
@@ -3059,6 +3079,52 @@ if (is_android || is_linux) {
       "//build/config:exe_and_shlib_deps",
     ]
   }
+}
+
+source_set("simple_multipath_quic_tools") {
+  sources = [
+    "tools/quic/chlo_extractor.cc",
+    "tools/quic/chlo_extractor.h",
+    "tools/quic/quic_client_base.cc",
+    "tools/quic/quic_client_base.h",
+    "tools/quic/quic_client_session.cc",
+    "tools/quic/quic_client_session.h",
+    "tools/quic/quic_dispatcher.cc",
+    "tools/quic/quic_dispatcher.h",
+    "tools/quic/quic_http_response_cache.cc",
+    "tools/quic/quic_http_response_cache.h",
+    "tools/quic/quic_per_connection_packet_writer.cc",
+    "tools/quic/quic_per_connection_packet_writer.h",
+    "tools/quic/quic_process_packet_interface.h",
+    "tools/quic/quic_simple_crypto_server_stream_helper.cc",
+    "tools/quic/quic_simple_crypto_server_stream_helper.h",
+    "tools/quic/quic_simple_dispatcher.cc",
+    "tools/quic/quic_simple_dispatcher.h",
+    "tools/quic/quic_simple_per_connection_packet_writer.cc",
+    "tools/quic/quic_simple_per_connection_packet_writer.h",
+    "tools/quic/quic_simple_server_packet_writer.cc",
+    "tools/quic/quic_simple_server_packet_writer.h",
+    "tools/quic/quic_simple_server_session.cc",
+    "tools/quic/quic_simple_server_session.h",
+    "tools/quic/quic_simple_server_stream.cc",
+    "tools/quic/quic_simple_server_stream.h",
+    "tools/quic/quic_spdy_client_stream.cc",
+    "tools/quic/quic_spdy_client_stream.h",
+    "tools/quic/quic_spdy_server_stream_base.cc",
+    "tools/quic/quic_spdy_server_stream_base.h",
+    "tools/quic/quic_time_wait_list_manager.cc",
+    "tools/quic/quic_time_wait_list_manager.h",
+    "tools/quic/stateless_rejector.cc",
+    "tools/quic/stateless_rejector.h",
+    "tools/quic/synchronous_host_resolver.cc",
+    "tools/quic/synchronous_host_resolver.h",
+  ]
+  deps = [
+    ":net",
+    "//base",
+    "//base/third_party/dynamic_annotations",
+    "//url",
+  ]
 }
 
 source_set("simple_quic_tools") {

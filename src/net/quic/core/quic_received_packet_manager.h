@@ -25,6 +25,8 @@ class QUIC_EXPORT_PRIVATE QuicReceivedPacketManager {
   explicit QuicReceivedPacketManager(QuicConnectionStats* stats);
   virtual ~QuicReceivedPacketManager();
 
+  void SetSubflowId(QuicSubflowId subflow_id);
+
   // Updates the internal state concerning which packets have been received.
   // header: the packet header.
   // timestamp: the arrival time of the packet.

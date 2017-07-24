@@ -142,7 +142,7 @@ void QuicSpdyStream::SetPriority(SpdyPriority priority) {
 }
 
 void QuicSpdyStream::OnStreamHeadersPriority(SpdyPriority priority) {
-  DCHECK_EQ(Perspective::IS_SERVER, session()->connection()->perspective());
+  DCHECK_EQ(Perspective::IS_SERVER, session()->AnyConnection()->perspective());
   SetPriority(priority);
 }
 
@@ -192,7 +192,7 @@ void QuicSpdyStream::OnPromiseHeaderList(
     const QuicHeaderList& /*header_list */) {
   // To be overridden in QuicSpdyClientStream.  Not supported on
   // server side.
-  session()->connection()->CloseConnection(
+  session()->CloseConnection(
       QUIC_INVALID_HEADERS_STREAM_DATA, "Promise headers received by server",
       ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
   return;
@@ -205,14 +205,14 @@ void QuicSpdyStream::OnTrailingHeadersComplete(
   DCHECK(!trailers_decompressed_);
   if (fin_received()) {
     QUIC_DLOG(ERROR) << "Received Trailers after FIN, on stream: " << id();
-    session()->connection()->CloseConnection(
+    session()->CloseConnection(
         QUIC_INVALID_HEADERS_STREAM_DATA, "Trailers after fin",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return;
   }
   if (!fin) {
     QUIC_DLOG(ERROR) << "Trailers must have FIN set, on stream: " << id();
-    session()->connection()->CloseConnection(
+    session()->CloseConnection(
         QUIC_INVALID_HEADERS_STREAM_DATA, "Fin missing from trailers",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return;
@@ -222,7 +222,7 @@ void QuicSpdyStream::OnTrailingHeadersComplete(
   if (!SpdyUtils::CopyAndValidateTrailers(header_list, &final_byte_offset,
                                           &received_trailers_)) {
     QUIC_DLOG(ERROR) << "Trailers for stream " << id() << " are malformed.";
-    session()->connection()->CloseConnection(
+    session()->CloseConnection(
         QUIC_INVALID_HEADERS_STREAM_DATA, "Trailers are malformed",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return;

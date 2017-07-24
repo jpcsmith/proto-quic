@@ -35,7 +35,7 @@ QuicSimpleServerSession::QuicSimpleServerSession(
       response_cache_(response_cache) {}
 
 QuicSimpleServerSession::~QuicSimpleServerSession() {
-  delete connection();
+  delete InitialConnection();
 }
 
 QuicCryptoServerStreamBase*
@@ -58,7 +58,7 @@ void QuicSimpleServerSession::StreamDraining(QuicStreamId id) {
 void QuicSimpleServerSession::OnStreamFrame(const QuicStreamFrame& frame) {
   if (!IsIncomingStream(frame.stream_id)) {
     QUIC_LOG(WARNING) << "Client shouldn't send data on server push stream";
-    connection()->CloseConnection(
+    CloseConnection(
         QUIC_INVALID_STREAM_ID, "Client sent data on server push stream",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return;
@@ -149,7 +149,7 @@ void QuicSimpleServerSession::HandleRstOnValidNonexistentStream(
     size_t index = (frame.stream_id - next_outgoing_stream_id()) / 2;
     DCHECK(index <= promised_streams_.size());
     promised_streams_[index].is_cancelled = true;
-    connection()->SendRstStream(frame.stream_id, QUIC_RST_ACKNOWLEDGEMENT, 0);
+    connection_manager()->SendRstStream(frame.stream_id, QUIC_RST_ACKNOWLEDGEMENT, 0);
   }
 }
 

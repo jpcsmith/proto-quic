@@ -138,6 +138,57 @@ class FakeProofVerifier : public ProofVerifier {
   }
 };
 
+void RequestSite(net::QuicMultipathClient& client,
+    SpdyHeaderBlock& header_block, string body) {
+  client.SendRequestAndWaitForResponse(header_block, body, true);
+
+  if (!FLAGS_quiet) {
+    cout << "Request:" << endl;
+    cout << "headers:" << header_block.DebugString();
+    if (!FLAGS_body_hex.empty()) {
+      cout << "body:\n"
+          << QuicTextUtils::HexDump(QuicTextUtils::HexDecode(FLAGS_body_hex))
+          << endl;
+    } else {
+      cout << "body: " << body << endl;
+    }
+    cout << endl;
+    if (!client.preliminary_response_headers().empty()) {
+      cout << "Preliminary response headers: "
+          << client.preliminary_response_headers() << endl;
+      cout << endl;
+    }
+    cout << "Response:" << endl;
+    cout << "headers: " << client.latest_response_headers() << endl;
+    string response_body = client.latest_response_body();
+    if (!FLAGS_body_hex.empty()) {
+      cout << "body:\n" << QuicTextUtils::HexDump(response_body) << endl;
+    } else {
+      cout << "body: " << response_body << endl;
+    }
+    cout << "trailers: " << client.latest_response_trailers() << endl;
+  }
+}
+
+int Response(net::QuicMultipathClient& client) {
+  size_t response_code = client.latest_response_code();
+  if (response_code >= 200 && response_code < 300) {
+    cout << "Request succeeded (" << response_code << ")." << endl;
+    return 0;
+  } else if (response_code >= 300 && response_code < 400) {
+    if (FLAGS_redirect_is_success) {
+      cout << "Request succeeded (redirect " << response_code << ")." << endl;
+      return 0;
+    } else {
+      cout << "Request failed (redirect " << response_code << ")." << endl;
+      return 1;
+    }
+  } else {
+    cerr << "Request failed (" << response_code << ")." << endl;
+    return 1;
+  }
+}
+
 int main(int argc, char* argv[]) {
   base::CommandLine::Init(argc, argv);
   base::CommandLine* line = base::CommandLine::ForCurrentProcess();
@@ -331,66 +382,20 @@ int main(int argc, char* argv[]) {
   // Make sure to store the response, for later output.
   client.set_store_response(true);
 
-  int nAdditionalSubflows = 1;
-  while(true) {
-    // Send the request.
-    client.SendRequestAndWaitForResponse(header_block, body, /*fin=*/true);
 
-    // Print request and response details.
-    if (!FLAGS_quiet) {
-      cout << "Request:" << endl;
-      cout << "headers:" << header_block.DebugString();
-      if (!FLAGS_body_hex.empty()) {
-        // Print the user provided hex, rather than binary body.
-        cout << "body:\n"
-             << QuicTextUtils::HexDump(QuicTextUtils::HexDecode(FLAGS_body_hex))
-             << endl;
-      } else {
-        cout << "body: " << body << endl;
-      }
-      cout << endl;
+  cout << "++++++++++ Adding new subflow:" << endl;
+  client.AddSubflow();
+  client.AddSubflow();
+  client.UseSubflowId(3);
 
-      if (!client.preliminary_response_headers().empty()) {
-        cout << "Preliminary response headers: "
-             << client.preliminary_response_headers() << endl;
-        cout << endl;
-      }
+  cout << "++++++++++ Request site #1" << endl;
+  RequestSite(client, header_block, body);
 
-      cout << "Response:" << endl;
-      cout << "headers: " << client.latest_response_headers() << endl;
-      string response_body = client.latest_response_body();
-      if (!FLAGS_body_hex.empty()) {
-        // Assume response is binary data.
-        cout << "body:\n" << QuicTextUtils::HexDump(response_body) << endl;
-      } else {
-        cout << "body: " << response_body << endl;
-      }
-      cout << "trailers: " << client.latest_response_trailers() << endl;
-    }
+  int test;
+  cin >> test;
 
+  cout << "++++++++++ Request site #2" << endl;
+  RequestSite(client, header_block, body);
 
-    if(nAdditionalSubflows--) continue;
-
-    cout << "Adding new subflow:" << endl;
-    client.AddSubflow();
-    client.UseSubflowId(3);
-
-    size_t response_code = client.latest_response_code();
-    if (response_code >= 200 && response_code < 300) {
-      cout << "Request succeeded (" << response_code << ")." << endl;
-      return 0;
-    } else if (response_code >= 300 && response_code < 400) {
-      if (FLAGS_redirect_is_success) {
-        cout << "Request succeeded (redirect " << response_code << ")." << endl;
-        return 0;
-      } else {
-        cout << "Request failed (redirect " << response_code << ")." << endl;
-        return 1;
-      }
-    } else {
-      cerr << "Request failed (" << response_code << ")." << endl;
-      return 1;
-    }
-  }
-
+  return Response(client);
 }

@@ -8,6 +8,7 @@
 #include "base/macros.h"
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/platform/api/quic_export.h"
+#include "net/quic/core/quic_connection_manager.h"
 
 namespace net {
 
@@ -39,7 +40,7 @@ class QUIC_EXPORT_PRIVATE QuicFlowControllerInterface {
 class QUIC_EXPORT_PRIVATE QuicFlowController
     : public QuicFlowControllerInterface {
  public:
-  QuicFlowController(QuicConnection* connection,
+  QuicFlowController(QuicConnectionManager* connection_manager_,
                      QuicStreamId id,
                      Perspective perspective,
                      QuicStreamOffset send_window_size,
@@ -122,10 +123,10 @@ class QUIC_EXPORT_PRIVATE QuicFlowController
   // Double the window size as long as we haven't hit the max window size.
   void IncreaseWindowSize();
 
-  // The parent connection, used to send connection close on flow control
+  // The parent connection manager, used to send connection close on flow control
   // violation, and WINDOW_UPDATE and BLOCKED frames when appropriate.
   // Not owned.
-  QuicConnection* connection_;
+  QuicConnectionManager* connection_manager_;
 
   // ID of stream this flow controller belongs to. This can be 0 if this is a
   // connection level flow controller.

@@ -103,7 +103,7 @@ QuicCryptoClientStream::QuicCryptoClientStream(
       verify_ok_(false),
       stateless_reject_received_(false),
       num_scup_messages_received_(0) {
-  DCHECK_EQ(Perspective::IS_CLIENT, session->connection()->perspective());
+  DCHECK_EQ(Perspective::IS_CLIENT, session->AnyConnection()->perspective());
 }
 
 QuicCryptoClientStream::~QuicCryptoClientStream() {
@@ -146,7 +146,7 @@ void QuicCryptoClientStream::OnHandshakeMessage(
 bool QuicCryptoClientStream::CryptoConnect() {
   next_state_ = STATE_INITIALIZE;
   DoHandshakeLoop(nullptr);
-  return session()->connection()->connected();
+  return session()->connected();
 }
 
 int QuicCryptoClientStream::num_sent_client_hellos() const {
@@ -173,8 +173,8 @@ void QuicCryptoClientStream::HandleServerConfigUpdateMessage(
   QuicCryptoClientConfig::CachedState* cached =
       crypto_config_->LookupOrCreate(server_id_);
   QuicErrorCode error = crypto_config_->ProcessServerConfigUpdate(
-      server_config_update, session()->connection()->clock()->WallNow(),
-      session()->connection()->version(), chlo_hash_, cached,
+      server_config_update, connection()->clock()->WallNow(),
+      connection()->version(), chlo_hash_, cached,
       crypto_negotiated_params_, &error_details);
 
   if (error != QUIC_NO_ERROR) {
@@ -267,8 +267,8 @@ void QuicCryptoClientStream::DoSendCHLO(
     // continue to send hellos because the server has abandoned state
     // for this connection.  Abandon further handshakes.
     next_state_ = STATE_NONE;
-    if (session()->connection()->connected()) {
-      session()->connection()->CloseConnection(
+    if (session()->connected()) {
+      session()->CloseConnection(
           QUIC_CRYPTO_HANDSHAKE_STATELESS_REJECT, "stateless reject received",
           ConnectionCloseBehavior::SILENT_CLOSE);
     }
@@ -276,7 +276,7 @@ void QuicCryptoClientStream::DoSendCHLO(
   }
 
   // Send the client hello in plaintext.
-  session()->connection()->SetDefaultEncryptionLevel(ENCRYPTION_NONE);
+  connection()->SetDefaultEncryptionLevel(ENCRYPTION_NONE);
   encryption_established_ = false;
   if (num_client_hellos_ > kMaxClientHellos) {
     CloseConnectionWithDetails(
@@ -295,17 +295,17 @@ void QuicCryptoClientStream::DoSendCHLO(
 
   // Send a local timestamp to the server.
   out.SetValue(kCTIM,
-               session()->connection()->clock()->WallNow().ToUNIXSeconds());
+               connection()->clock()->WallNow().ToUNIXSeconds());
 
-  if (!cached->IsComplete(session()->connection()->clock()->WallNow())) {
+  if (!cached->IsComplete(connection()->clock()->WallNow())) {
     crypto_config_->FillInchoateClientHello(
-        server_id_, session()->connection()->supported_versions().front(),
-        cached, session()->connection()->random_generator(),
+        server_id_, connection()->supported_versions().front(),
+        cached, connection()->random_generator(),
         /* demand_x509_proof= */ true, crypto_negotiated_params_, &out);
     // Pad the inchoate client hello to fill up a packet.
     const QuicByteCount kFramingOverhead = 50;  // A rough estimate.
     const QuicByteCount max_packet_size =
-        session()->connection()->max_packet_length();
+        connection()->max_packet_length();
     if (max_packet_size <= kFramingOverhead) {
       QUIC_DLOG(DFATAL) << "max_packet_length (" << max_packet_size
                         << ") has no room for framing overhead.";
@@ -339,10 +339,10 @@ void QuicCryptoClientStream::DoSendCHLO(
 
   string error_details;
   QuicErrorCode error = crypto_config_->FillClientHello(
-      server_id_, session()->connection()->connection_id(),
-      session()->connection()->supported_versions().front(), cached,
-      session()->connection()->clock()->WallNow(),
-      session()->connection()->random_generator(), channel_id_key_.get(),
+      server_id_, connection()->connection_id(),
+      connection()->supported_versions().front(), cached,
+      connection()->clock()->WallNow(),
+      connection()->random_generator(), channel_id_key_.get(),
       crypto_negotiated_params_, &out, &error_details);
   if (error != QUIC_NO_ERROR) {
     // Flush the cached config so that, if it's bad, the server has a
@@ -360,21 +360,21 @@ void QuicCryptoClientStream::DoSendCHLO(
   next_state_ = STATE_RECV_SHLO;
   SendHandshakeMessage(out);
   // Be prepared to decrypt with the new server write key.
-  session()->connection()->SetAlternativeDecrypter(
+  connection()->SetAlternativeDecrypter(
       ENCRYPTION_INITIAL,
       crypto_negotiated_params_->initial_crypters.decrypter.release(),
       true /* latch once used */);
   // Send subsequent packets under encryption on the assumption that the
   // server will accept the handshake.
-  session()->connection()->SetEncrypter(
+  connection()->SetEncrypter(
       ENCRYPTION_INITIAL,
       crypto_negotiated_params_->initial_crypters.encrypter.release());
-  session()->connection()->SetDefaultEncryptionLevel(ENCRYPTION_INITIAL);
+  connection()->SetDefaultEncryptionLevel(ENCRYPTION_INITIAL);
 
   // TODO(ianswett): Merge ENCRYPTION_REESTABLISHED and
   // ENCRYPTION_FIRST_ESTABLSIHED
   encryption_established_ = true;
-  session()->OnCryptoHandshakeEvent(QuicSession::ENCRYPTION_REESTABLISHED);
+  session()->OnCryptoHandshakeEvent(connection(), QuicSession::ENCRYPTION_REESTABLISHED);
 }
 
 void QuicCryptoClientStream::DoReceiveREJ(
@@ -417,13 +417,13 @@ void QuicCryptoClientStream::DoReceiveREJ(
 
   // Receipt of a REJ message means that the server received the CHLO
   // so we can cancel and retransmissions.
-  session()->connection()->NeuterUnencryptedPackets();
+  connection()->NeuterUnencryptedPackets();
 
   stateless_reject_received_ = in->tag() == kSREJ;
   string error_details;
   QuicErrorCode error = crypto_config_->ProcessRejection(
-      *in, session()->connection()->clock()->WallNow(),
-      session()->connection()->version(), chlo_hash_, cached,
+      *in, connection()->clock()->WallNow(),
+      connection()->version(), chlo_hash_, cached,
       crypto_negotiated_params_, &error_details);
 
   if (error != QUIC_NO_ERROR) {
@@ -459,7 +459,7 @@ QuicAsyncStatus QuicCryptoClientStream::DoVerifyProof(
 
   QuicAsyncStatus status = verifier->VerifyProof(
       server_id_.host(), server_id_.port(), cached->server_config(),
-      session()->connection()->version(), chlo_hash_, cached->certs(),
+      connection()->version(), chlo_hash_, cached->certs(),
       cached->cert_sct(), cached->signature(), verify_context_.get(),
       &verify_error_details_, &verify_details_,
       std::unique_ptr<ProofVerifierCallback>(proof_verify_callback));
@@ -571,7 +571,7 @@ void QuicCryptoClientStream::DoReceiveSHLO(
     // alternative_decrypter will be nullptr if the original alternative
     // decrypter latched and became the primary decrypter. That happens
     // if we received a message encrypted with the INITIAL key.
-    if (session()->connection()->alternative_decrypter() == nullptr) {
+    if (connection()->alternative_decrypter() == nullptr) {
       // The rejection was sent encrypted!
       CloseConnectionWithDetails(QUIC_CRYPTO_ENCRYPTION_LEVEL_INCORRECT,
                                  "encrypted REJ message");
@@ -590,7 +590,7 @@ void QuicCryptoClientStream::DoReceiveSHLO(
   // alternative_decrypter will be nullptr if the original alternative
   // decrypter latched and became the primary decrypter. That happens
   // if we received a message encrypted with the INITIAL key.
-  if (session()->connection()->alternative_decrypter() != nullptr) {
+  if (connection()->alternative_decrypter() != nullptr) {
     // The server hello was sent without encryption.
     CloseConnectionWithDetails(QUIC_CRYPTO_ENCRYPTION_LEVEL_INCORRECT,
                                "unencrypted SHLO message");
@@ -599,9 +599,9 @@ void QuicCryptoClientStream::DoReceiveSHLO(
 
   string error_details;
   QuicErrorCode error = crypto_config_->ProcessServerHello(
-      *in, session()->connection()->connection_id(),
-      session()->connection()->version(),
-      session()->connection()->server_supported_versions(), cached,
+      *in, connection()->connection_id(),
+      connection()->version(),
+      connection()->server_supported_versions(), cached,
       crypto_negotiated_params_, &error_details);
 
   if (error != QUIC_NO_ERROR) {
@@ -613,23 +613,23 @@ void QuicCryptoClientStream::DoReceiveSHLO(
     CloseConnectionWithDetails(error, "Server hello invalid: " + error_details);
     return;
   }
-  session()->OnConfigNegotiated();
+  session()->OnConfigNegotiated(connection());
 
   CrypterPair* crypters = &crypto_negotiated_params_->forward_secure_crypters;
   // TODO(agl): we don't currently latch this decrypter because the idea
   // has been floated that the server shouldn't send packets encrypted
   // with the FORWARD_SECURE key until it receives a FORWARD_SECURE
   // packet from the client.
-  session()->connection()->SetAlternativeDecrypter(
+  connection()->SetAlternativeDecrypter(
       ENCRYPTION_FORWARD_SECURE, crypters->decrypter.release(),
       false /* don't latch */);
-  session()->connection()->SetEncrypter(ENCRYPTION_FORWARD_SECURE,
+  connection()->SetEncrypter(ENCRYPTION_FORWARD_SECURE,
                                         crypters->encrypter.release());
-  session()->connection()->SetDefaultEncryptionLevel(ENCRYPTION_FORWARD_SECURE);
+  connection()->SetDefaultEncryptionLevel(ENCRYPTION_FORWARD_SECURE);
 
   handshake_confirmed_ = true;
-  session()->OnCryptoHandshakeEvent(QuicSession::HANDSHAKE_CONFIRMED);
-  session()->connection()->OnHandshakeComplete();
+  session()->OnCryptoHandshakeEvent(connection(), QuicSession::HANDSHAKE_CONFIRMED);
+  connection()->OnHandshakeComplete();
 }
 
 void QuicCryptoClientStream::DoInitializeServerConfigUpdate(

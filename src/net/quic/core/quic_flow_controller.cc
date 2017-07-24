@@ -20,14 +20,14 @@ namespace net {
   (perspective_ == Perspective::IS_SERVER ? "Server: " : "Client: ")
 
 QuicFlowController::QuicFlowController(
-    QuicConnection* connection,
+    QuicConnectionManager* connection_manager,
     QuicStreamId id,
     Perspective perspective,
     QuicStreamOffset send_window_offset,
     QuicStreamOffset receive_window_offset,
     bool should_auto_tune_receive_window,
     QuicFlowControllerInterface* session_flow_controller)
-    : connection_(connection),
+    : connection_manager_(connection_manager),
       id_(id),
       perspective_(perspective),
       bytes_sent_(0),
@@ -84,7 +84,7 @@ void QuicFlowController::AddBytesSent(QuicByteCount bytes_sent) {
     bytes_sent_ = send_window_offset_;
 
     // This is an error on our side, close the connection as soon as possible.
-    connection_->CloseConnection(
+    connection_manager_->CloseConnection(
         QUIC_FLOW_CONTROL_SENT_TOO_MUCH_DATA,
         QuicStrCat(send_window_offset_ - (bytes_sent_ + bytes_sent),
                    "bytes over send window offset"),
@@ -118,7 +118,7 @@ void QuicFlowController::MaybeIncreaseMaxWindowSize() {
   // that it may increase window size but never decreases.
 
   // Keep track of timing between successive window updates.
-  QuicTime now = connection_->clock()->ApproximateNow();
+  QuicTime now = connection_manager_->AnyConnection()->clock()->ApproximateNow();
   QuicTime prev = prev_window_update_time_;
   prev_window_update_time_ = now;
   if (!prev.IsInitialized()) {
@@ -131,8 +131,7 @@ void QuicFlowController::MaybeIncreaseMaxWindowSize() {
   }
 
   // Get outbound RTT.
-  QuicTime::Delta rtt =
-      connection_->sent_packet_manager().GetRttStats()->smoothed_rtt();
+  QuicTime::Delta rtt = connection_manager_->SmoothedRttForFlowController();
   if (rtt.IsZero()) {
     QUIC_DVLOG(1) << ENDPOINT << "rtt zero for stream " << id_;
     return;
@@ -191,7 +190,7 @@ void QuicFlowController::MaybeSendWindowUpdate() {
     QUIC_FLAG_COUNT(quic_reloadable_flag_quic_flow_control_faster_autotune);
     // Treat the initial window as if it is a window update, so if 1/2 the
     // window is used in less than 2 RTTs, the window is increased.
-    prev_window_update_time_ = connection_->clock()->ApproximateNow();
+    prev_window_update_time_ = connection_manager_->AnyConnection()->clock()->ApproximateNow();
   }
 
   if (available_window >= threshold) {
@@ -230,7 +229,7 @@ void QuicFlowController::MaybeSendBlocked() {
                     << ", send limit: " << send_window_offset_;
     // The entire send_window has been consumed, we are now flow control
     // blocked.
-    connection_->SendBlocked(id_);
+    connection_manager_->SendBlocked(id_);
 
     // Keep track of when we last sent a BLOCKED frame so that we only send one
     // at a given send offset.
@@ -293,7 +292,7 @@ void QuicFlowController::UpdateReceiveWindowSize(QuicStreamOffset size) {
 }
 
 void QuicFlowController::SendWindowUpdate() {
-  connection_->SendWindowUpdate(id_, receive_window_offset_);
+  connection_manager_->SendWindowUpdate(id_, receive_window_offset_);
 }
 
 }  // namespace net

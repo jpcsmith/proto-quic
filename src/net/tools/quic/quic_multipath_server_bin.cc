@@ -17,7 +17,7 @@
 #include "net/quic/core/quic_packets.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 #include "net/tools/quic/quic_http_response_cache.h"
-#include "net/tools/quic/quic_server.h"
+#include "net/tools/quic/quic_multipath_server.h"
 
 // The port the quic server will listen on.
 int32_t FLAGS_port = 6121;
@@ -81,7 +81,7 @@ int main(int argc, char* argv[]) {
   }
 
   net::QuicConfig config;
-  net::QuicServer server(
+  net::QuicMultipathServer server(
       CreateProofSource(line->GetSwitchValuePath("certificate_file"),
                         line->GetSwitchValuePath("key_file")),
       config, net::QuicCryptoServerConfig::ConfigOptions(),

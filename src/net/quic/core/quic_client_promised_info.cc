@@ -28,10 +28,10 @@ void QuicClientPromisedInfo::CleanupAlarm::OnAlarm() {
 }
 
 void QuicClientPromisedInfo::Init() {
-  cleanup_alarm_.reset(session_->connection()->alarm_factory()->CreateAlarm(
+  cleanup_alarm_.reset(session_->AnyConnection()->alarm_factory()->CreateAlarm(
       new QuicClientPromisedInfo::CleanupAlarm(this)));
   cleanup_alarm_->Set(
-      session_->connection()->helper()->GetClock()->ApproximateNow() +
+      session_->AnyConnection()->helper()->GetClock()->ApproximateNow() +
       QuicTime::Delta::FromSeconds(kPushPromiseTimeoutSecs));
 }
 

@@ -66,7 +66,7 @@ class QUIC_EXPORT_PRIVATE QuicPacketGenerator {
     // Consults delegate whether a packet should be generated.
     virtual bool ShouldGeneratePacket(HasRetransmittableData retransmittable,
                                       IsHandshake handshake) = 0;
-    virtual const QuicFrame GetUpdatedAckFrame() = 0;
+    virtual const QuicFrames GetUpdatedAckFrames() = 0;
     virtual void PopulateStopWaitingFrame(
         QuicStopWaitingFrame* stop_waiting) = 0;
   };

@@ -39,9 +39,8 @@ void QuicServerSessionBase::Initialize() {
       CreateQuicCryptoServerStream(crypto_config_, compressed_certs_cache_));
   QuicSpdySession::Initialize();
 }
-
-void QuicServerSessionBase::OnConfigNegotiated() {
-  QuicSpdySession::OnConfigNegotiated();
+void QuicServerSessionBase::OnConfigNegotiated(QuicConnection *connection) {
+  QuicSpdySession::OnConfigNegotiated(connection);
 
   if (!config()->HasReceivedConnectionOptions()) {
     return;
@@ -56,7 +55,7 @@ void QuicServerSessionBase::OnConfigNegotiated() {
       last_bandwidth_resumption || max_bandwidth_resumption;
 
   if (!FLAGS_quic_reloadable_flag_quic_enable_server_push_by_default ||
-      connection()->version() < QUIC_VERSION_35) {
+      AnyConnection()->version() < QUIC_VERSION_35) {
     set_server_push_enabled(
         ContainsQuicTag(config()->ReceivedConnectionOptions(), kSPSH));
   }
@@ -70,15 +69,15 @@ void QuicServerSessionBase::OnConfigNegotiated() {
       cached_network_params->serving_region() == serving_region_) {
     // Log the received connection parameters, regardless of how they
     // get used for bandwidth resumption.
-    connection()->OnReceiveConnectionState(*cached_network_params);
+    connection->OnReceiveConnectionState(*cached_network_params);
 
     if (bandwidth_resumption_enabled_) {
       // Only do bandwidth resumption if estimate is recent enough.
       const uint64_t seconds_since_estimate =
-          connection()->clock()->WallNow().ToUNIXSeconds() -
+          AnyConnection()->clock()->WallNow().ToUNIXSeconds() -
           cached_network_params->timestamp();
       if (seconds_since_estimate <= kNumSecondsPerHour) {
-        connection()->ResumeConnectionState(*cached_network_params,
+        connection->ResumeConnectionState(*cached_network_params,
                                             max_bandwidth_resumption);
       }
     }
@@ -96,7 +95,7 @@ void QuicServerSessionBase::OnConnectionClosed(QuicErrorCode error,
   }
 }
 
-void QuicServerSessionBase::OnCongestionWindowChange(QuicTime now) {
+void QuicServerSessionBase::OnCongestionWindowChange(QuicConnection* connection, QuicTime now) {
   if (!bandwidth_resumption_enabled_) {
     return;
   }
@@ -108,12 +107,12 @@ void QuicServerSessionBase::OnCongestionWindowChange(QuicTime now) {
   // If not enough time has passed since the last time we sent an update to the
   // client, or not enough packets have been sent, then return early.
   const QuicSentPacketManager& sent_packet_manager =
-      connection()->sent_packet_manager();
+      connection->sent_packet_manager();
   int64_t srtt_ms =
       sent_packet_manager.GetRttStats()->smoothed_rtt().ToMilliseconds();
   int64_t now_ms = (now - last_scup_time_).ToMilliseconds();
   int64_t packets_since_last_scup =
-      connection()->sent_packet_manager().GetLargestSentPacket() -
+      connection->sent_packet_manager().GetLargestSentPacket() -
       last_scup_packet_number_;
   if (now_ms < (kMinIntervalBetweenServerConfigUpdatesRTTs * srtt_ms) ||
       now_ms < kMinIntervalBetweenServerConfigUpdatesMs ||
@@ -180,30 +179,30 @@ void QuicServerSessionBase::OnCongestionWindowChange(QuicTime now) {
           ? CachedNetworkParameters::SLOW_START
           : CachedNetworkParameters::CONGESTION_AVOIDANCE);
   cached_network_params.set_timestamp(
-      connection()->clock()->WallNow().ToUNIXSeconds());
+      connection->clock()->WallNow().ToUNIXSeconds());
   if (!serving_region_.empty()) {
     cached_network_params.set_serving_region(serving_region_);
   }
 
   crypto_stream_->SendServerConfigUpdate(&cached_network_params);
 
-  connection()->OnSendConnectionState(cached_network_params);
+  connection->OnSendConnectionState(cached_network_params);
 
   last_scup_time_ = now;
   last_scup_packet_number_ =
-      connection()->sent_packet_manager().GetLargestSentPacket();
+      connection->sent_packet_manager().GetLargestSentPacket();
 }
 
 bool QuicServerSessionBase::ShouldCreateIncomingDynamicStream(QuicStreamId id) {
   DCHECK(!FLAGS_quic_reloadable_flag_quic_refactor_stream_creation);
-  if (!connection()->connected()) {
+  if (!connected()) {
     QUIC_BUG << "ShouldCreateIncomingDynamicStream called when disconnected";
     return false;
   }
 
   if (id % 2 == 0) {
     QUIC_DLOG(INFO) << "Invalid incoming even stream_id:" << id;
-    connection()->CloseConnection(
+    CloseConnection(
         QUIC_INVALID_STREAM_ID, "Client created even numbered stream",
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return false;
@@ -213,7 +212,7 @@ bool QuicServerSessionBase::ShouldCreateIncomingDynamicStream(QuicStreamId id) {
 
 bool QuicServerSessionBase::ShouldCreateOutgoingDynamicStream() {
   DCHECK(!FLAGS_quic_reloadable_flag_quic_refactor_stream_creation);
-  if (!connection()->connected()) {
+  if (!connected()) {
     QUIC_BUG << "ShouldCreateOutgoingDynamicStream called when disconnected";
     return false;
   }
