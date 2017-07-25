@@ -299,9 +299,10 @@ const string& QuicCryptoClientConfig::CachedState::server_config() const {
   return server_config_;
 }
 
-const string& QuicCryptoClientConfig::CachedState::source_address_token(
+string QuicCryptoClientConfig::CachedState::source_address_token(
     QuicConnection* connection) const {
-  return source_address_tokens_.find(connection)->second;
+  auto it = source_address_tokens_.find(connection);
+  return it == source_address_tokens_.end() ? "" : it->second;
 }
 
 const std::vector<string>& QuicCryptoClientConfig::CachedState::certs() const {
@@ -428,7 +429,8 @@ void QuicCryptoClientConfig::FillInchoateClientHello(
     QuicRandom* rand,
     bool demand_x509_proof,
     QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> out_params,
-    CryptoHandshakeMessage* out) const {
+    CryptoHandshakeMessage* out,
+    QuicConnection* connection) const {
   out->set_tag(kCHLO);
   // TODO(rch): Remove this when we remove:
   // FLAGS_quic_use_chlo_packet_size
@@ -455,9 +457,9 @@ void QuicCryptoClientConfig::FillInchoateClientHello(
     }
   }
 
-  if (!cached->source_address_token(scfg->Connection()).empty()) {
+  if (!cached->source_address_token(connection).empty()) {
     out->SetStringPiece(kSourceAddressTokenTag,
-        cached->source_address_token(scfg->Connection()));
+        cached->source_address_token(connection));
   }
 
   if (!demand_x509_proof) {
@@ -504,14 +506,16 @@ QuicErrorCode QuicCryptoClientConfig::FillClientHello(
     const ChannelIDKey* channel_id_key,
     QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> out_params,
     CryptoHandshakeMessage* out,
-    string* error_details) const {
+    string* error_details,
+    QuicConnection* connection) const {
   DCHECK(error_details != nullptr);
   if (QuicUtils::IsConnectionIdWireFormatBigEndian(Perspective::IS_CLIENT)) {
     connection_id = QuicEndian::HostToNet64(connection_id);
   }
 
   FillInchoateClientHello(server_id, preferred_version, cached, rand,
-                          /* demand_x509_proof= */ true, out_params, out);
+                          /* demand_x509_proof= */ true, out_params, out,
+                          connection);
 
   const CryptoHandshakeMessage* scfg = cached->GetServerConfig();
   if (!scfg) {

@@ -108,7 +108,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
     void SetProofInvalid();
 
     const std::string& server_config() const;
-    const std::string& source_address_token(QuicConnection* connection) const;
+    std::string source_address_token(QuicConnection* connection) const;
     const std::vector<std::string>& certs() const;
     const std::string& cert_sct() const;
     const std::string& chlo_hash() const;
@@ -239,7 +239,8 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
       QuicRandom* rand,
       bool demand_x509_proof,
       QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> out_params,
-      CryptoHandshakeMessage* out) const;
+      CryptoHandshakeMessage* out,
+      QuicConnection* connection) const;
 
   // FillClientHello sets |out| to be a CHLO message based on the configuration
   // of this object. This object must have cached enough information about
@@ -265,7 +266,8 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
       const ChannelIDKey* channel_id_key,
       QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> out_params,
       CryptoHandshakeMessage* out,
-      std::string* error_details) const;
+      std::string* error_details,
+      QuicConnection* connection) const;
 
   // ProcessRejection processes a REJ message from a server and updates the
   // cached information about that server. After this, |IsComplete| may return

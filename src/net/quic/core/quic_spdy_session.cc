@@ -465,7 +465,7 @@ size_t QuicSpdySession::WriteHeadersImpl(
   SpdySerializedFrame frame(spdy_framer_.SerializeFrame(headers_frame));
   headers_stream_->WriteOrBufferData(
       QuicStringPiece(frame.data(), frame.size()), false,
-      std::move(ack_notifier_delegate));
+      std::move(ack_notifier_delegate), nullptr);
   return frame.size();
 }
 
@@ -485,7 +485,7 @@ size_t QuicSpdySession::WritePushPromise(QuicStreamId original_stream_id,
 
   SpdySerializedFrame frame(spdy_framer_.SerializeFrame(push_promise));
   headers_stream_->WriteOrBufferData(
-      QuicStringPiece(frame.data(), frame.size()), false, nullptr);
+      QuicStringPiece(frame.data(), frame.size()), false, nullptr, nullptr);
   return frame.size();
 }
 
@@ -509,7 +509,7 @@ void QuicSpdySession::WriteDataFrame(
   // between streams.
   headers_stream_->WriteOrBufferData(
       QuicStringPiece(frame.data(), frame.size()), false,
-      std::move(force_hol_ack_listener));
+      std::move(force_hol_ack_listener), nullptr);
 }
 
 QuicConsumedData QuicSpdySession::WritevStreamData(
@@ -574,7 +574,7 @@ size_t QuicSpdySession::SendMaxHeaderListSize(size_t value) {
 
   SpdySerializedFrame frame(spdy_framer_.SerializeFrame(settings_frame));
   headers_stream_->WriteOrBufferData(
-      QuicStringPiece(frame.data(), frame.size()), false, nullptr);
+      QuicStringPiece(frame.data(), frame.size()), false, nullptr, nullptr);
   return frame.size();
 }
 
@@ -657,7 +657,7 @@ void QuicSpdySession::OnStreamFrameData(QuicStreamId stream_id,
                               QuicStringPiece(data, len));
   QUIC_DVLOG(1) << "De-encapsulating DATA frame for stream " << stream_id
                 << " offset " << offset << " len " << len << " fin " << fin;
-  OnStreamFrame(frame);
+  OnStreamFrame(frame, nullptr);
 }
 
 bool QuicSpdySession::ShouldReleaseHeadersStreamSequencerBuffer() {

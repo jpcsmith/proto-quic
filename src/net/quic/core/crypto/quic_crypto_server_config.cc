@@ -770,6 +770,9 @@ void QuicCryptoServerConfig::ProcessClientHelloAfterGetProof(
   }
 
   std::unique_ptr<CryptoHandshakeMessage> out(new CryptoHandshakeMessage);
+  // Always set the connection even for a reject so that the server hello
+  // can be sent back on the correct subflow.
+  out->SetConnection(validate_chlo_result.client_hello.Connection());
   if (!info.reject_reasons.empty() || !requested_config.get()) {
     BuildRejection(version, clock->WallNow(), *primary_config, client_hello,
                    info, validate_chlo_result.cached_network_params,

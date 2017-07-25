@@ -92,7 +92,7 @@ QuicCryptoClientStream::QuicCryptoClientStream(
       crypto_config_(crypto_config) {
   DCHECK_EQ(Perspective::IS_CLIENT, session->AnyConnection()->perspective());
   AddConnectionState(session->connection_manager()->InitialConnection(),
-      verify_context,server_id,proof_handler);
+      std::shared_ptr<ProofVerifyContext>(verify_context),server_id,proof_handler);
 }
 
 QuicCryptoClientStream::~QuicCryptoClientStream() {}
@@ -101,12 +101,12 @@ void QuicCryptoClientStream::OnHandshakeMessage(
     const CryptoHandshakeMessage& message) {
   QuicCryptoClientStreamBase::OnHandshakeMessage(message);
 
-  if(connection_states_.find(connection) == connection_states_.end()) {
-    AddConnectionState(connection);
+  if(!HasConnectionState(message.Connection())) {
+    AddConnectionState(message.Connection());
   }
 
-  DCHECK(connection_states_.find(message.Connection()) != connection_states_.end());
-  QuicCryptoClientStreamConnectionState* cs = connection_states_[message.Connection()];
+  DCHECK(HasConnectionState(message.Connection()));
+  QuicCryptoClientStreamConnectionState* cs = GetClientConnectionState(message.Connection());
 
   if (message.tag() == kSCUP) {
     if (!cs->handshake_confirmed()) {
@@ -136,13 +136,16 @@ void QuicCryptoClientStream::AddConnectionState(QuicConnection* connection) {
   // Create a new state for this connection using the same privacy mode but
   // adjust the server address for the new connection (the server address
   // might be different since we allow multipathing).
-  QuicCryptoClientStreamConnectionState* anyCS = connection_states_.begin()->second;
-  QuicServerId sid(connection->SubflowDescriptor().Peer(),anyCS->server_id_.privacy_mode());
+  DCHECK(!HasConnectionState(connection));
+  QuicCryptoClientStreamConnectionState* anyCS = (QuicCryptoClientStreamConnectionState*)
+      connection_states_.begin()->second.get();
+  QuicSocketAddress peerAddress = connection->SubflowDescriptor().Peer();
+  QuicServerId sid(peerAddress.host().ToString(),peerAddress.port(),anyCS->server_id_.privacy_mode());
   AddConnectionState(connection, anyCS->verify_context_, sid, anyCS->proof_handler_);
 }
 
 void QuicCryptoClientStream::AddConnectionState(QuicConnection* connection,
-                        ProofVerifyContext* verify_context,
+                        std::shared_ptr<ProofVerifyContext> verify_context,
                         const QuicServerId& server_id,
                         ProofHandler* proof_handler) {
   QuicCryptoStream::AddConnectionState(connection,
@@ -153,7 +156,7 @@ void QuicCryptoClientStream::AddConnectionState(QuicConnection* connection,
 QuicCryptoClientStream::QuicCryptoClientStreamConnectionState::
 QuicCryptoClientStreamConnectionState(
                 QuicConnection* connection,
-                ProofVerifyContext* verify_context,
+                std::shared_ptr<ProofVerifyContext> verify_context,
                 const QuicServerId& server_id,
                 ProofHandler* proof_handler,
                 QuicCryptoClientStream* stream) :
@@ -185,22 +188,28 @@ QuicCryptoClientStream::QuicCryptoClientStreamConnectionState::
 }
 
 bool QuicCryptoClientStream::CryptoConnect(QuicConnection* connection) {
-  QuicCryptoClientStreamConnectionState* cs;
-  if(connection_states_.find(connection) == connection_states_.end()) {
+  QUIC_LOG(INFO) << "CryptoConnect() on subflow " << connection->GetSubflowId();
+  if(!HasConnectionState(connection)) {
     AddConnectionState(connection);
   }
-  cs = connection_states_[connection];
+  QuicCryptoClientStreamConnectionState* cs;
+  cs = GetClientConnectionState(connection);
   cs->next_state_ = STATE_INITIALIZE;
   DoHandshakeLoop(cs, nullptr);
   return session()->connected();
 }
 
 int QuicCryptoClientStream::num_sent_client_hellos() const {
-  return connection_states_[session()->InitialConnection()]->num_sent_client_hellos();
+  return GetClientConnectionState(session()->InitialConnection())->num_sent_client_hellos();
 }
 
 int QuicCryptoClientStream::num_scup_messages_received() const {
-  return connection_states_[session()->InitialConnection()]->num_scup_messages_received();
+  return GetClientConnectionState(session()->InitialConnection())->num_scup_messages_received();
+}
+
+QuicCryptoClientStream::QuicCryptoClientStreamConnectionState* QuicCryptoClientStream::
+GetClientConnectionState(const QuicConnection* connection) const {
+  return (QuicCryptoClientStreamConnectionState*)GetConnectionState(connection);
 }
 
 void QuicCryptoClientStream::HandleServerConfigUpdateMessage(
@@ -345,7 +354,8 @@ void QuicCryptoClientStream::DoSendCHLO(
     crypto_config_->FillInchoateClientHello(
         cs->server_id_, cs->Connection()->supported_versions().front(),
         cached, cs->Connection()->random_generator(),
-        /* demand_x509_proof= */ true, cs->crypto_negotiated_params_, &out);
+        /* demand_x509_proof= */ true, cs->crypto_negotiated_params_, &out,
+        cs->Connection());
     // Pad the inchoate client hello to fill up a packet.
     const QuicByteCount kFramingOverhead = 50;  // A rough estimate.
     const QuicByteCount max_packet_size =
@@ -387,7 +397,7 @@ void QuicCryptoClientStream::DoSendCHLO(
       cs->Connection()->supported_versions().front(), cached,
       cs->Connection()->clock()->WallNow(),
       cs->Connection()->random_generator(), cs->channel_id_key_.get(),
-      cs->crypto_negotiated_params_, &out, &error_details);
+      cs->crypto_negotiated_params_, &out, &error_details, cs->Connection());
   if (error != QUIC_NO_ERROR) {
     // Flush the cached config so that, if it's bad, the server has a
     // chance to send us another in the future.
@@ -553,7 +563,7 @@ void QuicCryptoClientStream::DoVerifyProofComplete(
   if (cs->generation_counter_ != cached->generation_counter()) {
     cs->next_state_ = STATE_VERIFY_PROOF;
   } else {
-    SetCachedProofValid(cached);
+    SetCachedProofValid(cs, cached);
     cached->SetProofVerifyDetails(cs->verify_details_.release());
     if (!cs->handshake_confirmed()) {
       cs->next_state_ = STATE_GET_CHANNEL_ID;
@@ -569,7 +579,7 @@ QuicAsyncStatus QuicCryptoClientStream::DoGetChannelID(
     QuicCryptoClientConfig::CachedState* cached) {
   cs->next_state_ = STATE_GET_CHANNEL_ID_COMPLETE;
   cs->channel_id_key_.reset();
-  if (!RequiresChannelID(cached)) {
+  if (!RequiresChannelID(cs, cached)) {
     cs->next_state_ = STATE_SEND_CHLO;
     return QUIC_SUCCESS;
   }

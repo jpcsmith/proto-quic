@@ -68,7 +68,7 @@ class QuicSimpleServerSession : public QuicServerSessionBase {
   void StreamDraining(QuicStreamId id) override;
 
   // Override base class to detact client sending data on server push stream.
-  void OnStreamFrame(const QuicStreamFrame& frame) override;
+  void OnStreamFrame(const QuicStreamFrame& frame, QuicConnection* connection) override;
 
   // Send out PUSH_PROMISE for all |resources| promised stream id in each frame
   // will increase by 2 for each item in |resources|.

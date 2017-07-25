@@ -101,7 +101,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
 
   // Adds a connection state with a specific proofer and server id.
   void AddConnectionState(QuicConnection* connection,
-                          ProofVerifyContext* verify_context,
+                          std::shared_ptr<ProofVerifyContext> verify_context,
                           const QuicServerId& server_id,
                           ProofHandler* proof_handler);
 
@@ -125,7 +125,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
   public:
     QuicCryptoClientStreamConnectionState(
                     QuicConnection* connection,
-                    ProofVerifyContext* verify_context,
+                    std::shared_ptr<ProofVerifyContext> verify_context,
                     const QuicServerId& server_id,
                     ProofHandler* proof_handler,
                     QuicCryptoClientStream* stream);
@@ -223,7 +223,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
 
     // verify_context_ contains the context object that we pass to asynchronous
     // proof verifications.
-    std::unique_ptr<ProofVerifyContext> verify_context_;
+    std::shared_ptr<ProofVerifyContext> verify_context_;
 
     // proof_verify_callback_ contains the callback object that we passed to an
     // asynchronous proof verification. The ProofVerifier owns this object.
@@ -251,6 +251,9 @@ class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
 
     QuicCryptoClientStream* stream_;
   };
+
+  QuicCryptoClientStreamConnectionState*
+      GetClientConnectionState(const QuicConnection* connection) const;
 
   // Handles new server config and optional source-address token provided by the
   // server during a connection.

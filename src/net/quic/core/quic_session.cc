@@ -151,7 +151,7 @@ void QuicSession::OnPathDegrading() {}
 void QuicSession::StartCryptoConnect(QuicConnection* connection) {
   DCHECK(perspective() == Perspective::IS_CLIENT);
 
-  GetCryptoStream()->CryptoConnect(connection);
+  GetMutableCryptoStream()->CryptoConnect(connection);
 }
 
 void QuicSession::OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {
@@ -436,11 +436,11 @@ void QuicSession::OnFinalByteOffsetReceived(
 }
 
 bool QuicSession::IsEncryptionEstablished() const {
-  return GetCryptoStream()->encryption_established();
+  return GetCryptoStream()->encryption_established(nullptr);
 }
 
 bool QuicSession::IsCryptoHandshakeConfirmed() const {
-  return GetCryptoStream()->handshake_confirmed();
+  return GetCryptoStream()->handshake_confirmed(nullptr);
 }
 
 void QuicSession::OnConfigNegotiated(QuicConnection *connection) {
@@ -608,7 +608,6 @@ void QuicSession::OnCryptoHandshakeEvent(QuicConnection *connection, CryptoHands
       // Discard originally encrypted packets, since they can't be decrypted by
       // the peer.
       connection->NeuterUnencryptedPackets();
-      connection_manager()->OnHandshakeComplete();
       break;
 
     default:

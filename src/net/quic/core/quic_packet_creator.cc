@@ -577,7 +577,15 @@ bool QuicPacketCreator::ShouldRetransmit(const QuicFrame& frame) {
 
 bool QuicPacketCreator::AddFrame(const QuicFrame& frame,
                                  bool save_retransmittable_frames) {
-  if(queued_frames_.empty() && !prepended_frames_.empty() && &frame != &(*prepended_frames_.begin())) {
+  if(queued_frames_.empty() && // Only prepend frames
+      !prepended_frames_.empty() && // There are frames to prepend
+      // Prevent recursion loop
+      &frame != &(*prepended_frames_.begin()) &&
+      // Do not send prepended frames for handshake messages
+      frame.stream_frame->stream_id != kCryptoStreamId &&
+      // Do not send prepended frames in unencrypted messages
+      packet_.encryption_level != ENCRYPTION_NONE
+      ) {
     QUIC_DVLOG(1) << ENDPOINT << "Prepending frames.";
     for(const QuicFrame& f: prepended_frames_) {
       AddFrame(f, false);

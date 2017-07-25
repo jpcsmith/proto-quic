@@ -81,6 +81,16 @@ class QUIC_EXPORT_PRIVATE QuicCryptoStream
 
   const QuicCryptoNegotiatedParameters& crypto_negotiated_params() const;
 
+  // Returns true if the encryption is already established on a
+  // subflow. If the connection is the nullptr, this function returns
+  // true if any subflow has established the encryption.
+  bool encryption_established(QuicConnection* connection) const;
+
+  // Returns true if the handshake is already confirmed. If the connection
+  // is the nullptr, this function returns true if any subflow has established
+  // the encryption.
+  bool handshake_confirmed(QuicConnection* connection) const;
+
  protected:
   class QUIC_EXPORT_PRIVATE QuicCryptoStreamConnectionState {
   public:
@@ -103,16 +113,17 @@ class QUIC_EXPORT_PRIVATE QuicCryptoStream
 
   void AddConnectionState(QuicConnection* connection,
       QuicCryptoStreamConnectionState* connection_state) {
+    QUIC_LOG(INFO) << "Adding state for connection " << (long long)connection;
     connection_states_.insert(
         std::pair<QuicConnection*, std::unique_ptr<QuicCryptoStreamConnectionState> >(
             connection,
             std::unique_ptr<QuicCryptoStreamConnectionState>(connection_state)));
   }
 
-  //QuicConnection* connection() { return connection_; }
-
-  QuicCryptoStreamConnectionState* GetConnectionState(QuicConnection* connection) {
-    auto it = connection_states_.find(connection);
+  // Returns the QuicCryptoStreamConnectionState object corresponding to connection
+  // or nullptr if there is no object.
+  QuicCryptoStreamConnectionState* GetConnectionState(const QuicConnection* connection) const {
+    auto it = connection_states_.find(const_cast<QuicConnection*>(connection));
     if(it == connection_states_.end()) {
       return nullptr;
     } else {
@@ -120,12 +131,16 @@ class QUIC_EXPORT_PRIVATE QuicCryptoStream
     }
   }
 
+  bool HasConnectionState(QuicConnection* connection) const {
+    return connection_states_.find(connection) != connection_states_.end();
+  }
+
   // Get the connection state of the initial connection/subflow.
   // This is only used for functions that do not use multipathing
   // and cannot be removed from the build due to dependencies.
   QuicCryptoStreamConnectionState* GetInitialConnectionState() const {
     DCHECK(false);
-    return nullptr;//connection_states_[session()->InitialConnection()];
+    return nullptr;
   }
 
   std::map<QuicConnection*, std::unique_ptr<QuicCryptoStreamConnectionState> > connection_states_;

@@ -31,8 +31,9 @@ QuicStreamSequencerBuffer::FrameInfo::FrameInfo()
     : length(1), timestamp(QuicTime::Zero()) {}
 
 QuicStreamSequencerBuffer::FrameInfo::FrameInfo(size_t length,
-                                                QuicTime timestamp)
-    : length(length), timestamp(timestamp) {}
+                                                QuicTime timestamp,
+                                                QuicConnection* connection)
+    : length(length), timestamp(timestamp), connection(connection) {}
 
 QuicStreamSequencerBuffer::QuicStreamSequencerBuffer(size_t max_capacity_bytes)
     : max_buffer_capacity_bytes_(max_capacity_bytes),
@@ -327,7 +328,7 @@ QuicErrorCode QuicStreamSequencerBuffer::Readv(const iovec* dest_iov,
 
 int QuicStreamSequencerBuffer::GetReadableRegion(struct iovec* iov, QuicStreamSequencerBuffer::FrameInfo* fi) const {
   if(frame_arrival_time_map_.find(total_bytes_read_) != frame_arrival_time_map_.end()) {
-    *fi = frame_arrival_time_map_[total_bytes_read_];
+    *fi = frame_arrival_time_map_.find(total_bytes_read_)->second;
   }
   int iov_used = GetReadableRegions(iov, 1);
   return iov_used;
@@ -568,7 +569,7 @@ void QuicStreamSequencerBuffer::UpdateFrameArrivalMap(QuicStreamOffset offset) {
       // it back.
       auto updated = std::make_pair(
           offset, FrameInfo(erased.first + erased.second.length - offset,
-                            erased.second.timestamp));
+                            erased.second.timestamp, nullptr));
       QUIC_DVLOG(1) << "Inserted FrameInfo with offset: " << updated.first
                     << " and length: " << updated.second.length;
       frame_arrival_time_map_.insert(updated);

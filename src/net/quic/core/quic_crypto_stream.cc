@@ -65,13 +65,14 @@ void QuicCryptoStream::OnHandshakeMessage(
 
 void QuicCryptoStream::OnDataAvailable() {
   struct iovec iov;
-  struct FrameInfo fi;
+  struct net::QuicStreamSequencerBuffer::FrameInfo fi;
   while (true) {
     if (sequencer()->GetReadableRegion(&iov, &fi) != 1) {
       // No more data to read.
       break;
     }
     QuicConnection *connection = fi.connection;
+    DCHECK(connection != nullptr);
     QuicStringPiece data(static_cast<char*>(iov.iov_base), iov.iov_len);
     crypto_framer_.set_process_connection(connection);
     if (!crypto_framer_.ProcessInput(data, session()->perspective())) {
@@ -132,6 +133,37 @@ bool QuicCryptoStream::ExportTokenBindingKeyingMaterial(string* result) const {
 const QuicCryptoNegotiatedParameters&
 QuicCryptoStream::crypto_negotiated_params() const {
   return *GetInitialConnectionState()->crypto_negotiated_params_;
+}
+
+
+bool QuicCryptoStream::encryption_established(QuicConnection* connection) const {
+  if(connection == nullptr) {
+    return std::any_of(
+          connection_states_.begin(),connection_states_.end(),
+          [](const std::pair<QuicConnection* const,
+             std::unique_ptr<QuicCryptoStreamConnectionState>>& p) {
+        return p.second->encryption_established();
+      });
+  }
+  else {
+    DCHECK(HasConnectionState(connection));
+    return GetConnectionState(connection)->encryption_established();
+  }
+}
+
+bool QuicCryptoStream::handshake_confirmed(QuicConnection* connection) const {
+  if(connection == nullptr) {
+      return std::any_of(
+            connection_states_.begin(),connection_states_.end(),
+            [](const std::pair<QuicConnection* const,
+               std::unique_ptr<QuicCryptoStreamConnectionState>>& p) {
+          return p.second->handshake_confirmed();
+        });
+    }
+    else {
+      DCHECK(HasConnectionState(connection));
+      return GetConnectionState(connection)->handshake_confirmed();
+    }
 }
 
 QuicCryptoStream::QuicCryptoStreamConnectionState::

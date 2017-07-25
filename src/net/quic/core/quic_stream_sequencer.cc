@@ -52,7 +52,7 @@ void QuicStreamSequencer::OnStreamFrame(const QuicStreamFrame& frame,
   string error_details;
   QuicErrorCode result = buffered_frames_.OnStreamData(
       byte_offset, QuicStringPiece(frame.data_buffer, frame.data_length),
-      clock_->ApproximateNow(), &bytes_written, &error_details);
+      clock_->ApproximateNow(), &bytes_written, &error_details, connection);
   if (result != QUIC_NO_ERROR) {
     string details = QuicStrCat(
         "Stream ", stream_->id(), ": ", QuicErrorCodeToString(result), ": ",

@@ -71,6 +71,8 @@
 
 namespace net {
 
+class QuicConnection;
+
 namespace test {
 class QuicStreamSequencerBufferPeer;
 }  // namespace test

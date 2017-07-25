@@ -135,6 +135,7 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerStream
   class QuicCryptoServerStreamConnectionState;
 
   virtual void ProcessClientHello(
+      QuicCryptoServerStreamConnectionState* cs,
       QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
           result,
       std::unique_ptr<ProofSource::Details> proof_source_details,
@@ -284,6 +285,9 @@ class QUIC_EXPORT_PRIVATE QuicCryptoServerStream
     void FinishSendServerConfigUpdate(bool ok,
                                       const CryptoHandshakeMessage& message);
   };
+
+  QuicCryptoServerStreamConnectionState*
+  GetServerConnectionState(const QuicConnection* connection) const;
 
  private:
   friend class test::QuicCryptoServerStreamPeer;

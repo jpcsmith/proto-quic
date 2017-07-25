@@ -184,7 +184,7 @@ void QuicServerSessionBase::OnCongestionWindowChange(QuicConnection* connection,
     cached_network_params.set_serving_region(serving_region_);
   }
 
-  crypto_stream_->SendServerConfigUpdate(&cached_network_params);
+  crypto_stream_->SendServerConfigUpdate(connection, &cached_network_params);
 
   connection->OnSendConnectionState(cached_network_params);
 
@@ -216,7 +216,7 @@ bool QuicServerSessionBase::ShouldCreateOutgoingDynamicStream() {
     QUIC_BUG << "ShouldCreateOutgoingDynamicStream called when disconnected";
     return false;
   }
-  if (!crypto_stream_->encryption_established()) {
+  if (!crypto_stream_->encryption_established(nullptr)) {
     QUIC_BUG << "Encryption not established so no outgoing stream created.";
     return false;
   }
