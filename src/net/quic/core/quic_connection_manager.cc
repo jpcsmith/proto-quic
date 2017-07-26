@@ -17,9 +17,11 @@ QuicConnectionManager::QuicConnectionManager(QuicConnection *connection)
       connections_(std::map<QuicSubflowId, QuicConnection*>()),
       next_outgoing_subflow_id_(connection->perspective() == Perspective::IS_SERVER ? 2 : 3),
       current_subflow_id_(kInitialSubflowId),
-      next_subflow_id_(0) {
+      next_subflow_id_(0),
+      multipath_send_algorithm_(RoundRobinAlgorithm()) {
   AddConnection(connection->SubflowDescriptor(), kInitialSubflowId, connection);
   connection->set_visitor(this);
+  multipath_send_algorithm_->AddSubflow(kInitialSubflowId);
 }
 
 QuicConnectionManager::~QuicConnectionManager() {
@@ -66,17 +68,23 @@ QuicConsumedData QuicConnectionManager::SendStreamData(
     StreamSendingState state,
     QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
     QuicConnection* connection) {
-  if(connection == nullptr) {
-    connection = CurrentConnection();
+  QuicSubflowId hint = connection != nullptr ? connection->GetSubflowId() : 0;
+  MultipathSendAlgorithmInterface::SendReason reason =
+      MultipathSendAlgorithmInterface::SendReason::ENCRYPTED_TRANSMISSION;
+  if(connection != nullptr && connection->encryption_level() == ENCRYPTION_NONE) {
+    reason = MultipathSendAlgorithmInterface::SendReason::UNENCRYPTED_TRANSMISSION;
   }
-  return connection->SendStreamData(id,iov,offset,state,ack_listener);
+  QuicSubflowId subflowId = multipath_send_algorithm_->GetNextStreamFrameSubflow(id,
+      iov.total_length, hint, reason);
+  GetConnection(subflowId)->SendStreamData(id,iov,offset,state,ack_listener);
 }
 
 
 void QuicConnectionManager::SendRstStream(QuicStreamId id,
                                    QuicRstStreamErrorCode error,
                                    QuicStreamOffset bytes_written) {
-  CurrentConnection()->SendRstStream(id,error,bytes_written);
+  QuicSubflowId subflowId = multipath_send_algorithm_->GetNextControlFrameSubflow(QuicRstStreamFrame(id, error, bytes_written), nullptr);
+  GetConnection(subflowId)->SendRstStream(id,error,bytes_written);
 }
 
 void QuicConnectionManager::SendBlocked(QuicStreamId id) {

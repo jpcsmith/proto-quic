@@ -294,6 +294,8 @@ private:
   // The subflow that will be used as the current subflow as soon as it is open.
   QuicSubflowId next_subflow_id_;
 
+  MultipathSendAlgorithmInterface* multipath_send_algorithm_;
+
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionManager);
 };
 
