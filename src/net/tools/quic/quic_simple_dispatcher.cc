@@ -55,7 +55,7 @@ QuicServerSessionBase* QuicSimpleDispatcher::CreateQuicSession(
       connection_id, server_address, client_address, helper(), alarm_factory(),
       CreatePerConnectionWriter(),
       /* owns_writer= */ true, Perspective::IS_SERVER, GetSupportedVersions(),
-      kInitialSubflowId);
+      kInitialSubflowId, nullptr);
 
   QuicServerSessionBase* session = new QuicSimpleServerSession(
       config(), connection, this, session_helper(), crypto_config(),

@@ -25,6 +25,8 @@
 #include "net/quic/core/quic_unacked_packet_map.h"
 #include "net/quic/platform/api/quic_containers.h"
 #include "net/quic/platform/api/quic_export.h"
+#include "net/quic/core/congestion_control/multipath_send_algorithm_interface.h"
+#include "net/quic/platform/api/quic_subflow_descriptor.h"
 
 namespace net {
 
@@ -96,8 +98,12 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
                         const QuicClock* clock,
                         QuicConnectionStats* stats,
                         CongestionControlType congestion_control_type,
-                        LossDetectionType loss_type);
+                        LossDetectionType loss_type,
+                        QuicSubflowDescriptor descriptor,
+                        MultipathSendAlgorithmInterface* sendAlgorithm);
   virtual ~QuicSentPacketManager();
+
+  void SetMultipathSendAlgorithm(MultipathSendAlgorithmInterface* sendAlgorithm);
 
   virtual void SetFromConfig(const QuicConfig& config);
 
@@ -337,7 +343,6 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
   void SetSendAlgorithm(CongestionControlType congestion_control_type);
 
   // Sets the send algorithm to |send_algorithm| and points the pacing sender at
-  // |send_algorithm_|. Takes ownership of |send_algorithm|. Can be called any
   // number of times.
   void SetSendAlgorithm(SendAlgorithmInterface* send_algorithm);
 
@@ -364,7 +369,7 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
   NetworkChangeVisitor* network_change_visitor_;
   const QuicPacketCount initial_congestion_window_;
   RttStats rtt_stats_;
-  std::unique_ptr<SendAlgorithmInterface> send_algorithm_;
+  MultipathSendAlgorithmInterface* send_algorithm_;
   // Not owned. Always points to |general_loss_algorithm_| outside of tests.
   LossDetectionInterface* loss_algorithm_;
   GeneralLossAlgorithm general_loss_algorithm_;
@@ -424,6 +429,8 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
   QuicPacketNumber largest_packet_peer_knows_is_acked_;
 
   RetransmissionVisitor* retransmission_visitor_;
+
+  QuicSubflowDescriptor subflow_descriptor_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicSentPacketManager);
 };

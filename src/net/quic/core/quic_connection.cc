@@ -183,7 +183,8 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
                                QuicFramer *framer,
                                bool owns_framer,
                                bool do_not_perform_handshake,
-                               QuicSubflowId subflow_id)
+                               QuicSubflowId subflow_id,
+                               MultipathSendAlgorithmInterface* sendAlgorithm)
     : framer_(framer),
       owns_framer_(owns_framer),
       helper_(helper),
@@ -213,7 +214,7 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
           ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET),
       close_connection_after_five_rtos_(false),
       close_connection_after_three_rtos_(false),
-      received_packet_manager_(&stats_),
+      received_packet_manager_(&stats_, this),
       ack_queued_(false),
       num_retransmittable_packets_received_since_last_ack_sent_(0),
       last_ack_had_missing_packets_(false),
@@ -258,7 +259,7 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       time_of_last_received_packet_(clock_->ApproximateNow()),
       time_of_last_sent_new_packet_(clock_->ApproximateNow()),
       last_send_for_timeout_(clock_->ApproximateNow()),
-      sent_packet_manager_(perspective, clock_, &stats_, kCubicBytes, kNack),
+      sent_packet_manager_(perspective, clock_, &stats_, kCubicBytes, kNack, QuicSubflowDescriptor(self_address,peer_address), sendAlgorithm),
       version_negotiation_state_(START_NEGOTIATION),
       perspective_(perspective),
       connected_(true),
@@ -273,6 +274,7 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
       consecutive_num_packets_with_no_retransmittable_frames_(0),
       subflow_state_(SUBFLOW_OPEN_INITIATED),
       subflow_id_(subflow_id),
+      last_sent_unencrypted_packet_number_(std::numeric_limits<QuicPacketNumber>::max()),
       largest_observed_last_delay_(QuicTime::Delta::Zero()) {
   QUIC_DLOG(INFO) << ENDPOINT
                   << "Created connection with connection_id: " << connection_id;
@@ -320,7 +322,8 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
         owns_writer,
         perspective,
         supported_versions,
-        kInitialSubflowId)
+        kInitialSubflowId,
+        nullptr)
 {
 }
 
@@ -333,7 +336,8 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
                                bool owns_writer,
                                Perspective perspective,
                                const QuicVersionVector& supported_versions,
-                               QuicSubflowId subflow_id)
+                               QuicSubflowId subflow_id,
+                               MultipathSendAlgorithmInterface* send_algorithm)
     : QuicConnection(connection_id,
         self_address,
         peer_address,
@@ -346,7 +350,8 @@ QuicConnection::QuicConnection(QuicConnectionId connection_id,
         new QuicFramer(supported_versions, helper->GetClock()->ApproximateNow(), perspective),
         /* owns_framer */ true,
         /* do_not_perform_handshake */ false,
-        subflow_id)
+        subflow_id,
+        send_algorithm)
 {
 }
 
@@ -364,7 +369,8 @@ QuicConnection *QuicConnection::CloneToSubflow(
     QuicSubflowDescriptor descriptor,
     QuicPacketWriter *writer,
     bool owns_writer,
-    QuicSubflowId subflowId) {
+    QuicSubflowId subflowId,
+    MultipathSendAlgorithmInterface* sendAlgorithm) {
   QuicFramer *framer = new QuicFramer(
       supported_versions(),
       helper_->GetClock()->ApproximateNow(),
@@ -383,7 +389,8 @@ QuicConnection *QuicConnection::CloneToSubflow(
       framer,
       /* owns_framer */ true,
       /* do_not_perform_handshake */ true,
-      subflowId);
+      subflowId,
+      sendAlgorithm);
 
   return connection;
 }
@@ -580,7 +587,7 @@ bool QuicConnection::SelectMutualVersion(
 
 void QuicConnection::OnRetransmission(const QuicTransmissionInfo& transmission_info) {
   if(visitor_) {
-    visitor_->OnRetransmission(transmission_info);
+    visitor_->OnRetransmission(this, transmission_info);
   }
 }
 
@@ -1842,6 +1849,14 @@ void QuicConnection::OnSerializedPacket(SerializedPacket* serialized_packet) {
       consecutive_num_packets_with_no_retransmittable_frames_ = 0;
     }
   }
+
+  // Store the last sent unencrypted packet and whenever we receive an ACK
+  // frame, we can compare this value to largest_acknowledged to determine
+  // whether an encrypted packet is being acknowledged.
+  if(serialized_packet->encryption_level == ENCRYPTION_NONE) {
+    last_sent_unencrypted_packet_number_ = serialized_packet->packet_number;
+  }
+
   SendOrQueuePacket(serialized_packet);
 }
 
@@ -1876,6 +1891,10 @@ void QuicConnection::OnPathMtuIncreased(QuicPacketLength packet_size) {
   if (packet_size > max_packet_length()) {
     SetMaxPacketLength(packet_size);
   }
+}
+
+void QuicConnection::OnAckFrameUpdated() {
+  visitor_->OnAckFrameUpdated(this);
 }
 
 void QuicConnection::OnHandshakeComplete() {

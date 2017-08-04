@@ -177,9 +177,11 @@ class QUIC_EXPORT_PRIVATE QuicConnectionVisitorInterface {
 
   virtual void OnSubflowCloseFrame(QuicConnection* connection, const QuicSubflowCloseFrame& frame) = 0;
 
-  virtual void OnRetransmission(const QuicTransmissionInfo& transmission_info) = 0;
+  virtual void OnRetransmission(QuicConnection* connection, const QuicTransmissionInfo& transmission_info) = 0;
 
   virtual QuicFrames GetUpdatedAckFrames(QuicConnection* connection) = 0;
+
+  virtual void OnAckFrameUpdated(QuicConnection* connection) = 0;
 };
 
 // Interface which gets callbacks from the QuicConnection at interesting
@@ -310,7 +312,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
       public QuicBlockedWriterInterface,
       public QuicPacketGenerator::DelegateInterface,
       public QuicSentPacketManager::NetworkChangeVisitor,
-      public QuicSentPacketManager::RetransmissionVisitor {
+      public QuicSentPacketManager::RetransmissionVisitor,
+      public QuicReceivedPacketManagerVisitor {
  public:
   enum AckBundling {
     // Send an ack if it's already queued in the connection.
@@ -366,7 +369,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
                  bool owns_writer,
                  Perspective perspective,
                  const QuicVersionVector& supported_versions,
-                 QuicSubflowId subflow_id);
+                 QuicSubflowId subflow_id,
+                 MultipathSendAlgorithmInterface* sendAlgorithm);
   QuicConnection(QuicConnectionId connection_id,
                  QuicSocketAddress self_address,
                  QuicSocketAddress peer_address,
@@ -379,7 +383,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
                  QuicFramer *framer,
                  bool owns_framer,
                  bool do_not_perform_handshake,
-                 QuicSubflowId subflow_id);
+                 QuicSubflowId subflow_id,
+                 MultipathSendAlgorithmInterface* sendAlgorithm);
   ~QuicConnection() override;
 
   // Debugging purposes
@@ -395,7 +400,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
       QuicSubflowDescriptor descriptor,
       QuicPacketWriter *writer,
       bool owns_writer,
-      QuicSubflowId subflowId);
+      QuicSubflowId subflowId,
+      MultipathSendAlgorithmInterface* sendAlgorithm);
 
   // Set the ownership of the QuicFramer
   void SetOwnsFramer(bool owns_framer) { owns_framer_ = owns_framer; }
@@ -413,6 +419,9 @@ class QUIC_EXPORT_PRIVATE QuicConnection
 
   bool SubflowCloseFrameReceived(QuicPacketNumber largestAckedPacketNumber) {
     return first_subflow_close_frame_packet_number_ <= largestAckedPacketNumber;
+  }
+  bool AcknowledgingEncryptedPacket(QuicPacketNumber largestAckedPacketNumber) {
+    return last_sent_unencrypted_packet_number_ < largestAckedPacketNumber;
   }
 
   // Processes incoming ack frames for this connection. Returns false if the frame
@@ -588,6 +597,9 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   void OnPathDegrading() override;
   void OnPathMtuIncreased(QuicPacketLength packet_size) override;
 
+  // QuicReceivedPacketManagerVisitor
+  void OnAckFrameUpdated() override;
+
   // Called by the crypto stream when the handshake completes. In the server's
   // case this is when the SHLO has been ACKed. Clients call this on receipt of
   // the SHLO.
@@ -721,6 +733,10 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   // Returns the underlying sent packet manager.
   const QuicSentPacketManager& sent_packet_manager() const {
     return sent_packet_manager_;
+  }
+
+  void SetMultipathSendAlgorithm(MultipathSendAlgorithmInterface* send_algorithm) {
+    sent_packet_manager_.SetMultipathSendAlgorithm(send_algorithm);
   }
 
   bool CanWrite(HasRetransmittableData retransmittable);
@@ -1227,6 +1243,8 @@ class QUIC_EXPORT_PRIVATE QuicConnection
   QuicSubflowId subflow_id_;
 
   QuicPacketNumber first_subflow_close_frame_packet_number_;
+
+  QuicPacketNumber last_sent_unencrypted_packet_number_;
 
   // largest observed delay from the last ACK frame.
   QuicTime::Delta largest_observed_last_delay_;

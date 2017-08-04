@@ -592,6 +592,7 @@ void QuicSession::OnCryptoHandshakeEvent(QuicConnection *connection, CryptoHands
     case ENCRYPTION_FIRST_ESTABLISHED:
       // Given any streams blocked by encryption a chance to write.
       OnCanWrite(connection);
+      connection_manager_->OnHandshakeInitiated(connection);
       break;
 
     case ENCRYPTION_REESTABLISHED:
@@ -600,6 +601,7 @@ void QuicSession::OnCryptoHandshakeEvent(QuicConnection *connection, CryptoHands
       connection->RetransmitUnackedPackets(ALL_INITIAL_RETRANSMISSION);
       // Given any streams blocked by encryption a chance to write.
       OnCanWrite(connection);
+      connection_manager_->OnHandshakeInitiated(connection);
       break;
 
     case HANDSHAKE_CONFIRMED:
@@ -608,6 +610,7 @@ void QuicSession::OnCryptoHandshakeEvent(QuicConnection *connection, CryptoHands
       // Discard originally encrypted packets, since they can't be decrypted by
       // the peer.
       connection->NeuterUnencryptedPackets();
+      connection_manager_->OnHandshakeComplete(connection);
       break;
 
     default:

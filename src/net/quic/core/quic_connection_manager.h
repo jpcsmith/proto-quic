@@ -19,6 +19,7 @@
 #include "net/quic/core/quic_time.h"
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/core/quic_alarm.h"
+#include "net/quic/core/congestion_control/multipath_send_algorithm_interface.h"
 
 namespace net {
 
@@ -191,8 +192,10 @@ public:
                                      const QuicSocketAddress& peer_address,
                                      const QuicReceivedPacket& packet);
 
+  // Called when the client hello was sent
+  void OnHandshakeInitiated(QuicConnection* connection);
   // Called when the CryptoHandshakeEvent HANDSHAKE_CONFIRMED was received.
-  void OnHandshakeComplete();
+  void OnHandshakeComplete(QuicConnection* connection);
 
   // QuicConnectionVisitorInterface
   void OnStreamFrame(QuicConnection* connection, const QuicStreamFrame& frame) override;
@@ -218,8 +221,9 @@ public:
   bool OnAckFrame(QuicConnection* connection, const QuicAckFrame& frame, const QuicTime& arrival_time_of_packet) override;
   void OnNewSubflowFrame(QuicConnection* connection, const QuicNewSubflowFrame& frame) override;
   void OnSubflowCloseFrame(QuicConnection* connection, const QuicSubflowCloseFrame& frame) override;
-  void OnRetransmission(const QuicTransmissionInfo& transmission_info) override;
+  void OnRetransmission(QuicConnection* connection, const QuicTransmissionInfo& transmission_info) override;
   QuicFrames GetUpdatedAckFrames(QuicConnection* connection) override;
+  void OnAckFrameUpdated(QuicConnection* connection) override;
 
 private:
 
@@ -227,6 +231,19 @@ private:
     SUBFLOW_OUTGOING,
     SUBFLOW_INCOMING
   };
+
+  // debug purpose
+  void p(std::string prefix, QuicSubflowDescriptor d) {
+    std::string s;
+    if(GetConnection(d) == nullptr) {
+      s = "null";
+    } else if(GetConnection(d)->GetSubflowId() == 0) {
+      s = "unassigned subflow";
+    } else {
+      s = std::to_string(GetConnection(d)->GetSubflowId());
+    }
+    QUIC_LOG(INFO) << prefix << ": " << s;
+  }
 
   void AckReceivedForSubflow(QuicConnection* connection, const QuicAckFrame& frame);
 
@@ -266,6 +283,10 @@ private:
   QuicConnection* GetConnection(QuicSubflowId subflowId) const;
   QuicConnection* GetConnection(const QuicSubflowDescriptor& subflowId) const;
 
+  MultipathSendAlgorithmInterface* GetSendAlgorithm() {
+    return multipath_send_algorithm_.get();
+  }
+
   QuicConnectionManagerVisitorInterface *visitor_;
 
   // Whether a GoAway has been sent.
@@ -294,7 +315,7 @@ private:
   // The subflow that will be used as the current subflow as soon as it is open.
   QuicSubflowId next_subflow_id_;
 
-  MultipathSendAlgorithmInterface* multipath_send_algorithm_;
+  std::unique_ptr<MultipathSendAlgorithmInterface> multipath_send_algorithm_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionManager);
 };

@@ -6,27 +6,64 @@
 
 namespace net {
 
+RoundRobinAlgorithm::RoundRobinAlgorithm() :
+  subflow_descriptors_(std::vector<QuicSubflowDescriptor>()),
+  ack_frame_descriptors_(std::vector<QuicSubflowDescriptor>()),
+  current_index_(0) {
+
+}
+
 RoundRobinAlgorithm::~RoundRobinAlgorithm() {
+
 }
 
-void RoundRobinAlgorithm::AddSubflow(QuicSubflowId subflowId) {
+void RoundRobinAlgorithm::AddSubflow(const QuicSubflowDescriptor& subflowDescriptor,
+    const RttStats* rttStats) {
+  DCHECK(std::find(subflow_descriptors_.begin(),subflow_descriptors_.end(),subflowDescriptor) == subflow_descriptors_.end());
+  MultipathSchedulerInterface::AddSubflow(subflowDescriptor, rttStats);
+  subflow_descriptors_.push_back(subflowDescriptor);
 }
 
-QuicSubflowId RoundRobinAlgorithm::GetNextStreamFrameSubflow(
-    QuicStreamId streamId, size_t length, QuicSubflowId hint, SendReason reason) {
+std::list<QuicSubflowDescriptor> RoundRobinAlgorithm::GetSubflowPriority() {
+  size_t index = AdvanceIndex();
+  std::list<QuicSubflowDescriptor> p(subflow_descriptors_.begin()+index, subflow_descriptors_.end());
+  p.insert(p.end(),subflow_descriptors_.begin(),subflow_descriptors_.begin()+index);
+  return p;
 }
-QuicSubflowId RoundRobinAlgorithm::GetNextControlFrameSubflow(
-    const QuicFrame& frame, QuicSubflowId hint) {
+void RoundRobinAlgorithm::UsedSubflow(const QuicSubflowDescriptor& descriptor) {
+  // Change current index to the next index.
+  size_t index = 1;
+  for(QuicSubflowDescriptor d: subflow_descriptors_) {
+    if(d==descriptor) {
+      current_index_ = index;
+    }
+    ++index;
+  }
 }
 
-std::list<QuicSubflowId> RoundRobinAlgorithm::AppendAckFrames(
-    QuicSubflowId packetSubflowId) {
+std::list<QuicSubflowDescriptor> RoundRobinAlgorithm::GetAckFramePriority(
+    const QuicSubflowDescriptor& packetSubflowDescriptor) {
+  return std::list<QuicSubflowDescriptor>(
+        ack_frame_descriptors_.begin(),ack_frame_descriptors_.end());
 }
 void RoundRobinAlgorithm::AckFramesAppended(
-    const std::list<QuicSubflowId>& ackFrameSubflowIds) {
+    std::list<QuicSubflowDescriptor> descriptors) {
+  for(auto it: descriptors) {
+    auto pos = std::find(ack_frame_descriptors_.begin(),ack_frame_descriptors_.end(), it);
+    if(pos != ack_frame_descriptors_.end()) {
+      ack_frame_descriptors_.erase(pos);
+    }
+  }
+}
+void RoundRobinAlgorithm::OnAckFrameUpdated(const QuicSubflowDescriptor& descriptor) {
+  ack_frame_descriptors_.push_back(descriptor);
 }
 
-void RoundRobinAlgorithm::OnAckFrameUpdated(const QuicAckFrame& frame) {
+size_t RoundRobinAlgorithm::AdvanceIndex() {
+  return (current_index_++)%subflow_descriptors_.size();
+}
+void RoundRobinAlgorithm::SetIndex(size_t index) {
+  current_index_ = index;
 }
 
 }

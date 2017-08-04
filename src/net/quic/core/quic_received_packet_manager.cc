@@ -23,12 +23,14 @@ namespace {
 const size_t kMaxPacketsAfterNewMissing = 4;
 }
 
-QuicReceivedPacketManager::QuicReceivedPacketManager(QuicConnectionStats* stats)
+QuicReceivedPacketManager::QuicReceivedPacketManager(QuicConnectionStats* stats,
+    QuicReceivedPacketManagerVisitor* visitor)
     : peer_least_packet_awaiting_ack_(0),
       ack_frame_updated_(false),
       max_ack_ranges_(0),
       time_largest_observed_(QuicTime::Zero()),
-      stats_(stats) {
+      stats_(stats),
+      visitor_(visitor) {
   ack_frame_.largest_observed = 0;
 }
 
@@ -44,10 +46,10 @@ void QuicReceivedPacketManager::RecordPacketReceived(
     QuicTime receipt_time) {
   QuicPacketNumber packet_number = header.packet_number;
   DCHECK(IsAwaitingPacket(packet_number)) << " packet_number:" << packet_number;
-  if (!ack_frame_updated_) {
+  if (!ack_frame_updated()) {
     ack_frame_.received_packet_times.clear();
   }
-  ack_frame_updated_ = true;
+  set_ack_frame_updated(true);
   ack_frame_.packets.Add(header.packet_number);
 
   if (ack_frame_.largest_observed > packet_number) {
@@ -83,7 +85,7 @@ bool QuicReceivedPacketManager::IsAwaitingPacket(
 
 const QuicFrame QuicReceivedPacketManager::GetUpdatedAckFrame(
     QuicTime approximate_now) {
-  ack_frame_updated_ = false;
+  set_ack_frame_updated(false);
   if (time_largest_observed_ == QuicTime::Zero()) {
     // We have received no packets.
     ack_frame_.ack_delay_time = QuicTime::Delta::Infinite();
@@ -123,7 +125,7 @@ void QuicReceivedPacketManager::DontWaitForPacketsBefore(
     if (packets_updated) {
       // Ack frame gets updated because packets set is updated because of stop
       // waiting frame.
-      ack_frame_updated_ = true;
+      set_ack_frame_updated(true);
     }
   }
   DCHECK(ack_frame_.packets.Empty() ||
@@ -148,6 +150,14 @@ bool QuicReceivedPacketManager::ack_frame_updated() const {
 
 QuicPacketNumber QuicReceivedPacketManager::GetLargestObserved() const {
   return ack_frame_.largest_observed;
+}
+
+void QuicReceivedPacketManager::set_ack_frame_updated(bool ack_frame_updated) {
+  if(!ack_frame_updated_ && ack_frame_updated) {
+    // inform the owning connection that a new ack frame is available.
+    visitor_->OnAckFrameUpdated();
+  }
+  ack_frame_updated_ = ack_frame_updated;
 }
 
 }  // namespace net
