@@ -62,7 +62,7 @@ void QuicSpdyStream::WriteOrBufferBody(
     const string& data,
     bool fin,
     QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
-  WriteOrBufferData(data, fin, std::move(ack_listener));
+  WriteOrBufferData(data, fin, std::move(ack_listener), nullptr);
 }
 
 size_t QuicSpdyStream::WriteTrailers(
@@ -179,7 +179,7 @@ void QuicSpdyStream::OnInitialHeadersComplete(
   headers_decompressed_ = true;
   header_list_ = header_list;
   if (fin) {
-    OnStreamFrame(QuicStreamFrame(id(), fin, 0, QuicStringPiece()));
+    OnStreamFrame(QuicStreamFrame(id(), fin, 0, QuicStringPiece()), nullptr);
   }
   if (FinishedReadingHeaders()) {
     sequencer()->SetUnblocked();
@@ -229,7 +229,7 @@ void QuicSpdyStream::OnTrailingHeadersComplete(
   }
   trailers_decompressed_ = true;
   OnStreamFrame(
-      QuicStreamFrame(id(), fin, final_byte_offset, QuicStringPiece()));
+      QuicStreamFrame(id(), fin, final_byte_offset, QuicStringPiece()), nullptr);
 }
 
 void QuicSpdyStream::OnStreamReset(const QuicRstStreamFrame& frame) {
@@ -314,13 +314,15 @@ QuicConsumedData QuicSpdyStream::WritevDataInner(
     QuicIOVector iov,
     QuicStreamOffset offset,
     bool fin,
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
+    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+    QuicConnection* connection) {
   if (spdy_session_->headers_stream() != nullptr &&
       spdy_session_->force_hol_blocking()) {
     return spdy_session_->WritevStreamData(id(), iov, offset, fin,
                                            std::move(ack_listener));
   }
-  return QuicStream::WritevDataInner(iov, offset, fin, std::move(ack_listener));
+  return QuicStream::WritevDataInner(iov, offset, fin, std::move(ack_listener),
+      connection);
 }
 
 }  // namespace net

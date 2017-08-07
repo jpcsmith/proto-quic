@@ -34,7 +34,9 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencer {
   // data is processed or the stream fails to consume data.  Any unconsumed
   // data will be buffered. If the frame is not the next in line, it will be
   // buffered.
-  void OnStreamFrame(const QuicStreamFrame& frame);
+  void OnStreamFrame(const QuicStreamFrame& frame, QuicConnection* connection);
+
+  int GetReadableRegion(iovec* iov, QuicStreamSequencerBuffer::FrameInfo* fi) const;
 
   // Once data is buffered, it's up to the stream to read it when the stream
   // can handle more data.  The following three functions make that possible.

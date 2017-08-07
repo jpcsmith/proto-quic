@@ -71,6 +71,8 @@
 
 namespace net {
 
+class QuicConnection;
+
 namespace test {
 class QuicStreamSequencerBufferPeer;
 }  // namespace test
@@ -88,10 +90,11 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
   // A FrameInfo stores the length of a frame and the time it arrived.
   struct QUIC_EXPORT_PRIVATE FrameInfo {
     FrameInfo();
-    FrameInfo(size_t length, QuicTime timestamp);
+    FrameInfo(size_t length, QuicTime timestamp, QuicConnection *connection);
 
     size_t length;
     QuicTime timestamp;
+    QuicConnection *connection;
   };
 
   // Size of blocks used by this buffer.
@@ -121,7 +124,8 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
                              QuicStringPiece data,
                              QuicTime timestamp,
                              size_t* bytes_buffered,
-                             std::string* error_details);
+                             std::string* error_details,
+                             QuicConnection* connection);
 
   // Reads from this buffer into given iovec array, up to number of iov_len
   // iovec objects and returns the number of bytes read.
@@ -129,6 +133,8 @@ class QUIC_EXPORT_PRIVATE QuicStreamSequencerBuffer {
                       size_t dest_count,
                       size_t* bytes_read,
                       std::string* error_details);
+
+  int GetReadableRegion(struct iovec* iov, struct FrameInfo* fi) const;
 
   // Returns the readable region of valid data in iovec format. The readable
   // region is the buffer region where there is valid data not yet read by

@@ -97,7 +97,6 @@ QuicErrorCode QuicNegotiableUint32::ProcessPeerHello(
     const CryptoHandshakeMessage& peer_hello,
     HelloType hello_type,
     string* error_details) {
-  DCHECK(!negotiated());
   DCHECK(error_details != nullptr);
   uint32_t value;
   QuicErrorCode error = ReadUint32(peer_hello, tag_, presence_, default_value_,

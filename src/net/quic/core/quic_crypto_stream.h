@@ -16,6 +16,7 @@
 #include "net/quic/platform/api/quic_export.h"
 #include "net/quic/platform/api/quic_string_piece.h"
 
+
 namespace net {
 
 class CryptoHandshakeMessage;
@@ -39,6 +40,10 @@ class QUIC_EXPORT_PRIVATE QuicCryptoStream
       explicit QuicCryptoStream(QuicSession* session, QuicConnection* connection);
 
   ~QuicCryptoStream() override;
+
+  // Initiate sending handshake messages to establish a secure connection.
+  // Returns true if the session is still connected.
+  virtual bool CryptoConnect(QuicConnection* connection);
 
   // Returns the per-packet framing overhead associated with sending a
   // handshake message for |version|.
@@ -74,26 +79,74 @@ class QUIC_EXPORT_PRIVATE QuicCryptoStream
   // value.
   bool ExportTokenBindingKeyingMaterial(std::string* result) const;
 
-  bool encryption_established() const { return encryption_established_; }
-  bool handshake_confirmed() const { return handshake_confirmed_; }
-
   const QuicCryptoNegotiatedParameters& crypto_negotiated_params() const;
 
+  // Returns true if the encryption is already established on a
+  // subflow. If the connection is the nullptr, this function returns
+  // true if any subflow has established the encryption.
+  bool encryption_established(QuicConnection* connection) const;
+
+  // Returns true if the handshake is already confirmed. If the connection
+  // is the nullptr, this function returns true if any subflow has established
+  // the encryption.
+  bool handshake_confirmed(QuicConnection* connection) const;
+
  protected:
-  bool encryption_established_;
-  bool handshake_confirmed_;
+  class QUIC_EXPORT_PRIVATE QuicCryptoStreamConnectionState {
+  public:
+    QuicCryptoStreamConnectionState(QuicConnection* connection);
+    virtual ~QuicCryptoStreamConnectionState();
 
-  QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters>
-      crypto_negotiated_params_;
+    bool encryption_established() const { return encryption_established_; }
+    bool handshake_confirmed() const { return handshake_confirmed_; }
+    QuicConnection* Connection() { return connection_; }
 
-  QuicConnection* connection() { return connection_; }
+    bool encryption_established_;
+    bool handshake_confirmed_;
+
+    QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters>
+        crypto_negotiated_params_;
+
+  private:
+    QuicConnection* connection_;
+  };
+
+  void AddConnectionState(QuicConnection* connection,
+      QuicCryptoStreamConnectionState* connection_state) {
+    QUIC_LOG(INFO) << "Adding state for connection " << (long long)connection;
+    connection_states_.insert(
+        std::pair<QuicConnection*, std::unique_ptr<QuicCryptoStreamConnectionState> >(
+            connection,
+            std::unique_ptr<QuicCryptoStreamConnectionState>(connection_state)));
+  }
+
+  // Returns the QuicCryptoStreamConnectionState object corresponding to connection
+  // or nullptr if there is no object.
+  QuicCryptoStreamConnectionState* GetConnectionState(const QuicConnection* connection) const {
+    auto it = connection_states_.find(const_cast<QuicConnection*>(connection));
+    if(it == connection_states_.end()) {
+      return nullptr;
+    } else {
+      return it->second.get();
+    }
+  }
+
+  bool HasConnectionState(QuicConnection* connection) const {
+    return connection_states_.find(connection) != connection_states_.end();
+  }
+
+  // Get the connection state of the initial connection/subflow.
+  // This is only used for functions that do not use multipathing
+  // and cannot be removed from the build due to dependencies.
+  QuicCryptoStreamConnectionState* GetInitialConnectionState() const {
+    DCHECK(false);
+    return nullptr;
+  }
+
+  std::map<QuicConnection*, std::unique_ptr<QuicCryptoStreamConnectionState> > connection_states_;
 
  private:
   CryptoFramer crypto_framer_;
-
-  // The connection on which the crypto handshake should be performed.
-  // (not owned)
-  QuicConnection* connection_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicCryptoStream);
 };

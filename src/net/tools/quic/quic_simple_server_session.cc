@@ -55,7 +55,8 @@ void QuicSimpleServerSession::StreamDraining(QuicStreamId id) {
   }
 }
 
-void QuicSimpleServerSession::OnStreamFrame(const QuicStreamFrame& frame) {
+void QuicSimpleServerSession::OnStreamFrame(const QuicStreamFrame& frame,
+    QuicConnection* connection) {
   if (!IsIncomingStream(frame.stream_id)) {
     QUIC_LOG(WARNING) << "Client shouldn't send data on server push stream";
     CloseConnection(
@@ -63,7 +64,7 @@ void QuicSimpleServerSession::OnStreamFrame(const QuicStreamFrame& frame) {
         ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return;
   }
-  QuicSpdySession::OnStreamFrame(frame);
+  QuicSpdySession::OnStreamFrame(frame, connection);
 }
 
 void QuicSimpleServerSession::PromisePushResources(

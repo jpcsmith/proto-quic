@@ -368,10 +368,7 @@ QuicConnection *QuicConnection::CloneToSubflow(
   QuicFramer *framer = new QuicFramer(
       supported_versions(),
       helper_->GetClock()->ApproximateNow(),
-      perspective_,
-      framer_->CryptoContext(),
-      false,
-      framer_->version());
+      perspective_);
 
   QuicConnection *connection = new QuicConnection(
       connection_id_,
@@ -387,7 +384,6 @@ QuicConnection *QuicConnection::CloneToSubflow(
       /* owns_framer */ true,
       /* do_not_perform_handshake */ true,
       subflowId);
-  connection->SetDefaultEncryptionLevel(encryption_level());
 
   return connection;
 }
@@ -396,7 +392,7 @@ bool QuicConnection::HandleIncomingAckFrame(
     const QuicAckFrame& frame,
     const QuicTime& arrival_time_of_packet) {
   DCHECK(connected_);
-  DCHECK(frame.subflow_id == subflow_id_);
+  DCHECK(frame.subflow_id == 0 || frame.subflow_id == subflow_id_);
   if (debug_visitor_ != nullptr) {
     debug_visitor_->OnAckFrame(frame);
   }
@@ -659,7 +655,7 @@ bool QuicConnection::OnProtocolVersionMismatch(QuicVersion received_version) {
   }
 
   version_negotiation_state_ = NEGOTIATED_VERSION;
-  visitor_->OnSuccessfulVersionNegotiation(subflow_id_,received_version);
+  visitor_->OnSuccessfulVersionNegotiation(this,received_version);
   if (debug_visitor_ != nullptr) {
     debug_visitor_->OnSuccessfulVersionNegotiation(received_version);
   }
@@ -857,8 +853,8 @@ bool QuicConnection::OnStreamFrame(const QuicStreamFrame& frame) {
                     ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
     return false;
   }
-  visitor_->OnStreamFrame(subflow_id_,frame);
-  visitor_->PostProcessAfterData(subflow_id_);
+  visitor_->OnStreamFrame(this,frame);
+  visitor_->PostProcessAfterData(this);
   stats_.stream_bytes_received += frame.data_length;
   should_last_packet_instigate_acks_ = true;
   return connected_;
@@ -866,7 +862,7 @@ bool QuicConnection::OnStreamFrame(const QuicStreamFrame& frame) {
 
 bool QuicConnection::OnAckFrame(const QuicAckFrame& incoming_ack) {
   if(visitor_) {
-    return visitor_->OnAckFrame(subflow_id_, incoming_ack, time_of_last_received_packet_);
+    return visitor_->OnAckFrame(this, incoming_ack, time_of_last_received_packet_);
   }
   DCHECK(false);
   return false;
@@ -981,8 +977,8 @@ bool QuicConnection::OnRstStreamFrame(const QuicRstStreamFrame& frame) {
                   << "RST_STREAM_FRAME received for stream: " << frame.stream_id
                   << " with error: "
                   << QuicRstStreamErrorCodeToString(frame.error_code);
-  visitor_->OnRstStream(subflow_id_,frame);
-  visitor_->PostProcessAfterData(subflow_id_);
+  visitor_->OnRstStream(this,frame);
+  visitor_->PostProcessAfterData(this);
   should_last_packet_instigate_acks_ = true;
   return connected_;
 }
@@ -1017,8 +1013,8 @@ bool QuicConnection::OnGoAwayFrame(const QuicGoAwayFrame& frame) {
                   << " and error: " << QuicErrorCodeToString(frame.error_code)
                   << " and reason: " << frame.reason_phrase;
 
-  visitor_->OnGoAway(subflow_id_,frame);
-  visitor_->PostProcessAfterData(subflow_id_);
+  visitor_->OnGoAway(this,frame);
+  visitor_->PostProcessAfterData(this);
   should_last_packet_instigate_acks_ = true;
   return connected_;
 }
@@ -1031,8 +1027,8 @@ bool QuicConnection::OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {
   QUIC_DLOG(INFO) << ENDPOINT << "WINDOW_UPDATE_FRAME received for stream: "
                   << frame.stream_id
                   << " with byte offset: " << frame.byte_offset;
-  visitor_->OnWindowUpdateFrame(subflow_id_,frame);
-  visitor_->PostProcessAfterData(subflow_id_);
+  visitor_->OnWindowUpdateFrame(this,frame);
+  visitor_->PostProcessAfterData(this);
   should_last_packet_instigate_acks_ = true;
   return connected_;
 }
@@ -1044,8 +1040,8 @@ bool QuicConnection::OnBlockedFrame(const QuicBlockedFrame& frame) {
   }
   QUIC_DLOG(INFO) << ENDPOINT
                   << "BLOCKED_FRAME received for stream: " << frame.stream_id;
-  visitor_->OnBlockedFrame(subflow_id_,frame);
-  visitor_->PostProcessAfterData(subflow_id_);
+  visitor_->OnBlockedFrame(this,frame);
+  visitor_->PostProcessAfterData(this);
   stats_.blocked_frames_received++;
   should_last_packet_instigate_acks_ = true;
   return connected_;
@@ -1055,6 +1051,7 @@ bool QuicConnection::OnNewSubflowFrame(const QuicNewSubflowFrame& frame) {
   DCHECK(connected_);
   QUIC_DLOG(INFO) << ENDPOINT
                   << "NEW_SUBFLOW_FRAME received for subflow: " << frame.subflow_id;
+  visitor_->OnNewSubflowFrame(this,frame);
   return connected_;
 }
 
@@ -1062,7 +1059,7 @@ bool QuicConnection::OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) {
   DCHECK(connected_);
   QUIC_DLOG(INFO) << ENDPOINT
                   << "SUBFLOW_CLOSE_FRAME received for subflow: " << frame.subflow_id;
-  visitor_->OnSubflowCloseFrame(subflow_id_,frame);
+  visitor_->OnSubflowCloseFrame(this,frame);
   return connected_;
 }
 
@@ -1161,7 +1158,7 @@ void QuicConnection::ClearLastFrames() {
 const QuicFrames QuicConnection::GetUpdatedAckFrames() {
   //TODO(cyrill) call visitor and collect all updated ack frames.
   if(visitor_) {
-    return visitor_->GetUpdatedAckFrames(subflow_id_);
+    return visitor_->GetUpdatedAckFrames(this);
   }
   DCHECK(false);
   return QuicFrames();
@@ -1193,7 +1190,7 @@ void QuicConnection::MaybeSendInResponseToPacket() {
 void QuicConnection::SendVersionNegotiationPacket() {
   pending_version_negotiation_packet_ = true;
   if (writer_->IsWriteBlocked()) {
-    visitor_->OnWriteBlocked(subflow_id_);
+    visitor_->OnWriteBlocked(this);
     return;
   }
   QUIC_DLOG(INFO) << ENDPOINT << "Sending version negotiation packet: {"
@@ -1211,7 +1208,7 @@ void QuicConnection::SendVersionNegotiationPacket() {
     return;
   }
   if (result.status == WRITE_STATUS_BLOCKED) {
-    visitor_->OnWriteBlocked(subflow_id_);
+    visitor_->OnWriteBlocked(this);
     if (writer_->IsWriteBlockedDataBuffered()) {
       pending_version_negotiation_packet_ = false;
     }
@@ -1414,13 +1411,13 @@ void QuicConnection::OnCanWrite() {
 
   {
     ScopedPacketBundler bundler(this, SEND_ACK_IF_QUEUED);
-    visitor_->OnCanWrite(subflow_id_);
-    visitor_->PostProcessAfterData(subflow_id_);
+    visitor_->OnCanWrite(this);
+    visitor_->PostProcessAfterData(this);
   }
 
   // After the visitor writes, it may have caused the socket to become write
   // blocked or the congestion manager to prohibit sending, so check again.
-  if (visitor_->WillingAndAbleToWrite(subflow_id_) && !resume_writes_alarm_->IsSet() &&
+  if (visitor_->WillingAndAbleToWrite(this) && !resume_writes_alarm_->IsSet() &&
       CanWrite(HAS_RETRANSMITTABLE_DATA)) {
     // We're not write blocked, but some stream didn't write out all of its
     // bytes. Register for 'immediate' resumption so we'll keep writing after
@@ -1499,7 +1496,7 @@ bool QuicConnection::ProcessValidatedPacket(const QuicPacketHeader& header) {
         DCHECK_EQ(1u, header.public_header.versions.size());
         DCHECK_EQ(header.public_header.versions[0], version());
         version_negotiation_state_ = NEGOTIATED_VERSION;
-        visitor_->OnSuccessfulVersionNegotiation(subflow_id_,version());
+        visitor_->OnSuccessfulVersionNegotiation(this,version());
         if (debug_visitor_ != nullptr) {
           debug_visitor_->OnSuccessfulVersionNegotiation(version());
         }
@@ -1510,7 +1507,7 @@ bool QuicConnection::ProcessValidatedPacket(const QuicPacketHeader& header) {
       // it should stop sending version since the version negotiation is done.
       packet_generator_.StopSendingVersion();
       version_negotiation_state_ = NEGOTIATED_VERSION;
-      visitor_->OnSuccessfulVersionNegotiation(subflow_id_,version());
+      visitor_->OnSuccessfulVersionNegotiation(this,version());
       if (debug_visitor_ != nullptr) {
         debug_visitor_->OnSuccessfulVersionNegotiation(version());
       }
@@ -1600,7 +1597,7 @@ bool QuicConnection::CanWrite(HasRetransmittableData retransmittable) {
   }
 
   if (writer_->IsWriteBlocked()) {
-    visitor_->OnWriteBlocked(subflow_id_);
+    visitor_->OnWriteBlocked(this);
     return false;
   }
 
@@ -1665,7 +1662,7 @@ bool QuicConnection::WritePacket(SerializedPacket* packet) {
     // This assures we won't try to write *forced* packets when blocked.
     // Return true to stop processing.
     if (writer_->IsWriteBlocked()) {
-      visitor_->OnWriteBlocked(subflow_id_);
+      visitor_->OnWriteBlocked(this);
       return true;
     }
   }
@@ -1696,7 +1693,7 @@ bool QuicConnection::WritePacket(SerializedPacket* packet) {
   }
 
   if (result.status == WRITE_STATUS_BLOCKED) {
-    visitor_->OnWriteBlocked(subflow_id_);
+    visitor_->OnWriteBlocked(this);
     // If the socket buffers the the data, then the packet should not
     // be queued and sent again, which would result in an unnecessary
     // duplicate packet being sent.  The helper must call OnCanWrite
@@ -1857,7 +1854,7 @@ void QuicConnection::OnUnrecoverableError(QuicErrorCode error,
 }
 
 void QuicConnection::OnCongestionChange() {
-  visitor_->OnCongestionWindowChange(subflow_id_,clock_->ApproximateNow());
+  visitor_->OnCongestionWindowChange(this,clock_->ApproximateNow());
 
   // Uses the connection's smoothed RTT. If zero, uses initial_rtt.
   QuicTime::Delta rtt = sent_packet_manager_.GetRttStats()->smoothed_rtt();
@@ -1872,7 +1869,7 @@ void QuicConnection::OnCongestionChange() {
 }
 
 void QuicConnection::OnPathDegrading() {
-  visitor_->OnPathDegrading(subflow_id_);
+  visitor_->OnPathDegrading(this);
 }
 
 void QuicConnection::OnPathMtuIncreased(QuicPacketLength packet_size) {
@@ -1944,7 +1941,7 @@ void QuicConnection::SendAck() {
     return;
   }
 
-  visitor_->OnAckNeedsRetransmittableFrame(subflow_id_);
+  visitor_->OnAckNeedsRetransmittableFrame(this);
   if (!packet_generator_.HasRetransmittableFrames()) {
     // Visitor did not add a retransmittable frame, add a ping frame.
     packet_generator_.AddControlFrame(QuicFrame(QuicPingFrame()));
@@ -1956,7 +1953,7 @@ void QuicConnection::OnRetransmissionTimeout() {
 
   if (close_connection_after_three_rtos_ &&
       sent_packet_manager_.GetConsecutiveRtoCount() >= 2 &&
-      !visitor_->HasOpenDynamicStreams(subflow_id_)) {
+      !visitor_->HasOpenDynamicStreams(this)) {
     // Close on the 3rd consecutive RTO, so after 2 previous RTOs have occurred.
     CloseConnection(QUIC_TOO_MANY_RTOS, "3 consecutive retransmission timeouts",
                     ConnectionCloseBehavior::SEND_CONNECTION_CLOSE_PACKET);
@@ -2130,7 +2127,7 @@ void QuicConnection::TearDownLocalConnectionState(
   // |visitor_| to fix crash bug. Delete |visitor_| check and histogram after
   // fix is merged.
   if (notify_visitor && visitor_ != nullptr) {
-    visitor_->OnConnectionClosed(subflow_id_, error, error_details, source);
+    visitor_->OnConnectionClosed(this, error, error_details, source);
   } else {
     UMA_HISTOGRAM_BOOLEAN("Net.QuicCloseConnection.NullVisitor", true);
   }
@@ -2192,7 +2189,7 @@ bool QuicConnection::CanWriteStreamData() {
   }
 
   IsHandshake pending_handshake =
-      visitor_->HasPendingHandshake(subflow_id_) ? IS_HANDSHAKE : NOT_HANDSHAKE;
+      visitor_->HasPendingHandshake(this) ? IS_HANDSHAKE : NOT_HANDSHAKE;
   // Sending queued packets may have caused the socket to become write blocked,
   // or the congestion manager to prohibit sending.  If we've sent everything
   // we had queued and we're still not blocked, let the visitor know it can
@@ -2279,7 +2276,7 @@ void QuicConnection::SetPingAlarm() {
     // Only clients send pings.
     return;
   }
-  if (!visitor_->HasOpenDynamicStreams(subflow_id_)) {
+  if (!visitor_->HasOpenDynamicStreams(this)) {
     ping_alarm_->Cancel();
     // Don't send a ping unless there are open streams.
     return;
@@ -2533,7 +2530,7 @@ void QuicConnection::StartPeerMigration(
 
   // TODO(jri): Move these calls to OnPeerMigrationValidated. Rename
   // OnConnectionMigration methods to OnPeerMigration.
-  visitor_->OnConnectionMigration(subflow_id_, peer_migration_type);
+  visitor_->OnConnectionMigration(this, peer_migration_type);
   sent_packet_manager_.OnConnectionMigration(peer_migration_type);
 }
 
@@ -2594,7 +2591,7 @@ const QuicTime::Delta QuicConnection::DelayedAckTime() {
 void QuicConnection::CheckIfApplicationLimited() {
   if (queued_packets_.empty() &&
       !sent_packet_manager_.HasPendingRetransmissions() &&
-      !visitor_->WillingAndAbleToWrite(subflow_id_)) {
+      !visitor_->WillingAndAbleToWrite(this)) {
     sent_packet_manager_.OnApplicationLimited();
   }
 }

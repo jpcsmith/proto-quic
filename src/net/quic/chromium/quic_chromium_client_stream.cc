@@ -393,7 +393,7 @@ int QuicChromiumClientStream::WriteStreamData(
   // We should not have data buffered.
   DCHECK(!HasBufferedData());
   // Writes the data, or buffers it.
-  WriteOrBufferData(data, fin, nullptr);
+  WriteOrBufferData(data, fin, nullptr, nullptr);
   if (!HasBufferedData()) {
     return OK;
   }
@@ -413,7 +413,7 @@ int QuicChromiumClientStream::WritevStreamData(
   for (size_t i = 0; i < buffers.size(); ++i) {
     bool is_fin = fin && (i == buffers.size() - 1);
     QuicStringPiece string_data(buffers[i]->data(), lengths[i]);
-    WriteOrBufferData(string_data, is_fin, nullptr);
+    WriteOrBufferData(string_data, is_fin, nullptr, nullptr);
   }
   if (!HasBufferedData()) {
     return OK;

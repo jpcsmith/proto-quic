@@ -27,7 +27,7 @@ public:
   virtual ~QuicConnectionManagerVisitorInterface() {}
 
   // A simple visitor interface for dealing with a data frame.
-  virtual void OnStreamFrame(const QuicStreamFrame& frame) = 0;
+  virtual void OnStreamFrame(const QuicStreamFrame& frame, QuicConnection* connection) = 0;
 
   // The session should process the WINDOW_UPDATE frame, adjusting both stream
   // and connection level flow control windows.
@@ -91,6 +91,9 @@ public:
   // Called to ask if any streams are open in this visitor, excluding the
   // reserved crypto and headers stream.
   virtual bool HasOpenDynamicStreams() const = 0;
+
+  // Called to start sending crypto handshakes on this connection.
+  virtual void StartCryptoConnect(QuicConnection* connection) = 0;
 };
 
 class QUIC_EXPORT_PRIVATE QuicConnectionManager: public QuicConnectionVisitorInterface {
@@ -167,7 +170,8 @@ public:
       QuicIOVector iov,
       QuicStreamOffset offset,
       StreamSendingState state,
-      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
+      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+      QuicConnection* connection);
   virtual void SendRstStream(QuicStreamId id,
                              QuicRstStreamErrorCode error,
                              QuicStreamOffset bytes_written);
@@ -190,152 +194,67 @@ public:
   // Called when the CryptoHandshakeEvent HANDSHAKE_CONFIRMED was received.
   void OnHandshakeComplete();
 
-  // QuicSubflowCreationAttemptDelegate
-  //void OnSubflowCreationFailed(QuicSubflowId id) override;
-
   // QuicConnectionVisitorInterface
-  void OnStreamFrame(const QuicSubflowId& subflowId, const QuicStreamFrame& frame) override;
-  void OnWindowUpdateFrame(const QuicSubflowId& subflowId, const QuicWindowUpdateFrame& frame) override;
-  void OnBlockedFrame(const QuicSubflowId& subflowId, const QuicBlockedFrame& frame) override;
-  void OnRstStream(const QuicSubflowId& subflowId, const QuicRstStreamFrame& frame) override;
-  void OnGoAway(const QuicSubflowId& subflowId, const QuicGoAwayFrame& frame) override;
-  void OnConnectionClosed(const QuicSubflowId& subflowId,
+  void OnStreamFrame(QuicConnection* connection, const QuicStreamFrame& frame) override;
+  void OnWindowUpdateFrame(QuicConnection* connection, const QuicWindowUpdateFrame& frame) override;
+  void OnBlockedFrame(QuicConnection* connection, const QuicBlockedFrame& frame) override;
+  void OnRstStream(QuicConnection* connection, const QuicRstStreamFrame& frame) override;
+  void OnGoAway(QuicConnection* connection, const QuicGoAwayFrame& frame) override;
+  void OnConnectionClosed(QuicConnection* connection,
                                   QuicErrorCode error,
                                   const std::string& error_details,
                                   ConnectionCloseSource source) override;
-  void OnWriteBlocked(const QuicSubflowId& subflowId) override;
-  void OnSuccessfulVersionNegotiation(const QuicSubflowId& subflowId, const QuicVersion& version) override;
-  void OnCanWrite(const QuicSubflowId& subflowId) override;
-  void OnCongestionWindowChange(const QuicSubflowId& subflowId, QuicTime now) override;
-  void OnConnectionMigration(const QuicSubflowId& subflowId, PeerAddressChangeType type) override;
-  void OnPathDegrading(const QuicSubflowId& subflowId) override;
-  void PostProcessAfterData(const QuicSubflowId& subflowId) override;
-  void OnAckNeedsRetransmittableFrame(const QuicSubflowId& subflowId) override;
-  bool WillingAndAbleToWrite(const QuicSubflowId& subflowId) const override;
-  bool HasPendingHandshake(const QuicSubflowId& subflowId) const override;
-  bool HasOpenDynamicStreams(const QuicSubflowId& subflowId) const override;
-  bool OnAckFrame(const QuicSubflowId& subflowId, const QuicAckFrame& frame, const QuicTime& arrival_time_of_packet) override;
-  void OnSubflowCloseFrame(const QuicSubflowId& subflowId, const QuicSubflowCloseFrame& frame) override;
+  void OnWriteBlocked(QuicConnection* connection) override;
+  void OnSuccessfulVersionNegotiation(QuicConnection* connection, const QuicVersion& version) override;
+  void OnCanWrite(QuicConnection* connection) override;
+  void OnCongestionWindowChange(QuicConnection* connection, QuicTime now) override;
+  void OnConnectionMigration(QuicConnection* connection, PeerAddressChangeType type) override;
+  void OnPathDegrading(QuicConnection* connection) override;
+  void PostProcessAfterData(QuicConnection* connection) override;
+  void OnAckNeedsRetransmittableFrame(QuicConnection* connection) override;
+  bool WillingAndAbleToWrite(QuicConnection* connection) const override;
+  bool HasPendingHandshake(QuicConnection* connection) const override;
+  bool HasOpenDynamicStreams(QuicConnection* connection) const override;
+  bool OnAckFrame(QuicConnection* connection, const QuicAckFrame& frame, const QuicTime& arrival_time_of_packet) override;
+  void OnNewSubflowFrame(QuicConnection* connection, const QuicNewSubflowFrame& frame) override;
+  void OnSubflowCloseFrame(QuicConnection* connection, const QuicSubflowCloseFrame& frame) override;
   void OnRetransmission(const QuicTransmissionInfo& transmission_info) override;
-  QuicFrames GetUpdatedAckFrames(const QuicSubflowId& subflow_id) override;
-
-
-
-
-  /*class QUIC_EXPORT_PRIVATE QuicSubflowCreationAttempt : public QuicAlarm::Delegate {
-  public:
-    const size_t kSubflowCreationTimeout = 1000;
-
-    class QUIC_EXPORT_PRIVATE QuicSubflowCreationAttemptDelegate {
-      virtual void OnSubflowCreationFailed(QuicSubflowId id) = 0;
-    };
-
-    QuicSubflowCreationAttempt(QuicSubflowDescriptor descriptor,
-        QuicSubflowId subflow_id,
-        QuicSubflowCreationAttemptDelegate *visitor,
-        QuicClock *clock,
-        QuicAlarmFactory *alarmFactory) :
-          descriptor_(descriptor),
-          subflow_id_(subflow_id),
-          last_attempt_time_(clock->ApproximateNow()),
-          n_attempts_(1),
-          visitor_(visitor)
-    {
-      alarm_ = alarmFactory->CreateAlarm(this);
-      alarm_->Set(last_attempt_time_+kSubflowCreationTimeout);
-    }
-
-    ~QuicSubflowCreationAttempt() {
-      delete alarm_;
-    }
-
-    void OnAlarm() override {
-      visitor_->OnSubflowCreationFailed(subflow_id_);
-    }
-
-  private:
-    QuicSubflowDescriptor descriptor_;
-    QuicSubflowId subflow_id_;
-    QuicTime last_attempt_time_;
-    size_t n_attempts_;
-    QuicSubflowCreationAttemptDelegate *visitor_;
-    QuicAlarm *alarm_;
-
-    DISALLOW_COPY_AND_ASSIGN(QuicSubflowCreationAttempt);
-  };*/
-
-protected:
+  QuicFrames GetUpdatedAckFrames(QuicConnection* connection) override;
 
 private:
-  class QUIC_EXPORT_PRIVATE QuicSubflowPacketHandler : public QuicFramerVisitorInterface {
-  public:
-    QuicSubflowPacketHandler(
-        const QuicVersionVector& supported_versions,
-        QuicTime creation_time,
-        Perspective perspective,
-        QuicFramerCryptoContext *cc,
-        bool owns_cc,
-        QuicVersion version)
-    : framer_(supported_versions, creation_time, perspective, cc, owns_cc, version) {
-      framer_.set_visitor(this);
-    }
-    ~QuicSubflowPacketHandler() override {}
-
-    // Processes a packet from a new subflow and checks whether there is exactly
-    // one NEW_SUBFLOW frame.
-    bool ProcessPacket(const QuicReceivedPacket& packet) {
-      n_new_subflow_frames_ = 0;
-      if(!framer_.ProcessPacket(packet)) {
-        //TODO error handling
-        return false;
-      }
-
-      return n_new_subflow_frames_ == 1;
-    }
-    QuicSubflowId GetLastSubflowId() {
-      return subflow_id_;
-    }
-
-    void OnPacket() override;
-    bool OnUnauthenticatedPublicHeader(
-        const QuicPacketPublicHeader& header) override;
-    bool OnUnauthenticatedHeader(const QuicPacketHeader& header) override;
-    void OnError(QuicFramer* framer) override;
-    bool OnProtocolVersionMismatch(QuicVersion received_version) override; //TODO is this possible?
-    void OnPublicResetPacket(const QuicPublicResetPacket& packet) override;
-    void OnVersionNegotiationPacket(
-        const QuicVersionNegotiationPacket& packet) override;
-    void OnDecryptedPacket(EncryptionLevel level) override;
-    bool OnPacketHeader(const QuicPacketHeader& header) override;
-    bool OnStreamFrame(const QuicStreamFrame& frame) override;
-    bool OnAckFrame(const QuicAckFrame& frame) override;
-    bool OnStopWaitingFrame(const QuicStopWaitingFrame& frame) override;
-    bool OnPaddingFrame(const QuicPaddingFrame& frame) override;
-    bool OnPingFrame(const QuicPingFrame& frame) override;
-    bool OnRstStreamFrame(const QuicRstStreamFrame& frame) override;
-    bool OnConnectionCloseFrame(const QuicConnectionCloseFrame& frame) override;
-    bool OnGoAwayFrame(const QuicGoAwayFrame& frame) override;
-    bool OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
-    bool OnBlockedFrame(const QuicBlockedFrame& frame) override;
-    bool OnNewSubflowFrame(const QuicNewSubflowFrame& frame) override;
-    bool OnSubflowCloseFrame(const QuicSubflowCloseFrame& frame) override;
-    void OnPacketComplete() override;
-  private:
-    QuicFramer framer_;
-    QuicSubflowId subflow_id_;
-    int n_new_subflow_frames_;
-
-    DISALLOW_COPY_AND_ASSIGN(QuicSubflowPacketHandler);
-  };
 
   enum SubflowDirection {
     SUBFLOW_OUTGOING,
     SUBFLOW_INCOMING
   };
-  void OpenConnection(QuicSubflowDescriptor descriptor, QuicSubflowId subflowId, SubflowDirection direction);
+
+  void AckReceivedForSubflow(QuicConnection* connection, const QuicAckFrame& frame);
+
+  // Creates a QuicConnection object for the specified subflow descriptor.
+  void OpenConnection(QuicSubflowDescriptor descriptor, SubflowDirection direction);
+
+  // Assigns a specific subflow id to a subflow.
+  void AssignConnection(QuicSubflowDescriptor descriptor, QuicSubflowId subflowId, SubflowDirection direction);
+
+  // Adds the QuicConnection object to the connections_ and subflow_descriptor_map_ map.
   void AddConnection(QuicSubflowDescriptor descriptor, QuicSubflowId subflowId, QuicConnection *connection);
-  void CloseConnection(QuicSubflowId subflowId, SubflowDirection direction);
+
+  // Removes the connection from the connections_ and subflow_descriptor_map_ map.
   void RemoveConnection(QuicSubflowId subflowId);
+
+  // Adds the connection to the unassigned_subflow_map_ map.
+  void AddUnassignedConnection(QuicSubflowDescriptor descriptor, QuicConnection *connection);
+
+  // Removes the connection from the unassigned_subflow_map_ map.
+  void RemoveUnassignedConnection(QuicSubflowDescriptor descriptor);
+
+  // If direction == SUBFLOW_INCOMING the peer initiated the closing and we
+  // received a SUBFLOW_CLOSE frame for this subflow.
+  // If direction == SUBFLOW_OUTGOING then we initiated the closing and start
+  // sending SUBFLOW_CLOSE frame.
+  void CloseConnection(QuicSubflowId subflowId, SubflowDirection direction);
+
+  bool IsSubflowIdValid(QuicSubflowId subflowId, SubflowDirection direction, std::string* detailed_error);
 
   // Create packet writer for new connections
   QuicPacketWriter *GetPacketWriter(QuicSubflowDescriptor descriptor);
@@ -343,8 +262,9 @@ private:
   void InitializeSubflowPacketHandler();
 
   QuicSubflowId GetNextOutgoingSubflowId();
-  bool IsValidIncomingSubflowId(QuicSubflowId id);
-  bool IsValidOutgoingSubflowId(QuicSubflowId id);
+
+  QuicConnection* GetConnection(QuicSubflowId subflowId) const;
+  QuicConnection* GetConnection(const QuicSubflowDescriptor& subflowId) const;
 
   QuicConnectionManagerVisitorInterface *visitor_;
 
@@ -359,17 +279,12 @@ private:
 
   std::map<QuicSubflowDescriptor, QuicSubflowId> subflow_descriptor_map_;
 
-  // A set of all subflows where a connection attempt was made.
-  std::set<QuicSubflowDescriptor> buffered_outgoing_subflow_attempts_;
-  // A set of buffered packets with their corresponding QuicSubflowDescriptor
-  std::vector<std::pair<QuicSubflowDescriptor, std::unique_ptr<QuicReceivedPacket>> > buffered_incoming_subflow_attempts_;
+  // Stores the connections with incoming handshake messages that did not yet
+  // send a NEW_SUBFLOW frame (using a 0-RTT or 1-RTT packet).
+  std::map<QuicSubflowDescriptor, QuicConnection*> unassigned_subflow_map_;
 
   // The ID to use for the next outgoing subflow.
   QuicSubflowId next_outgoing_subflow_id_;
-
-  // QuicFramer wrapper class for reading packets that do not belong to
-  // a connection. (Packets on new subflows)
-  QuicSubflowPacketHandler *packet_handler_;
 
   std::map<QuicSubflowDescriptor, QuicPacketWriter*> packet_writer_map_;
 
@@ -378,12 +293,6 @@ private:
 
   // The subflow that will be used as the current subflow as soon as it is open.
   QuicSubflowId next_subflow_id_;
-
-  /*std::map<QuicSubflowDescriptor, QuicSubflowCreationAttempt> subflow_attempt_map_;
-
-  // helper classes
-  QuicClock *clock_;
-  QuicAlarmFactory *alarm_factory_;*/
 
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionManager);
 };

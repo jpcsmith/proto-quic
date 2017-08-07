@@ -85,7 +85,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
   virtual void Initialize();
 
   // QuicConnectionManagerVisitorInterface methods:
-  void OnStreamFrame(const QuicStreamFrame& frame) override;
+  void OnStreamFrame(const QuicStreamFrame& frame, QuicConnection *connection) override;
   void OnRstStream(const QuicRstStreamFrame& frame) override;
   void OnGoAway(const QuicGoAwayFrame& frame) override;
   void OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) override;
@@ -107,6 +107,7 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
   bool HasPendingHandshake() const override;
   bool HasOpenDynamicStreams() const override;
   void OnPathDegrading() override;
+  void StartCryptoConnect(QuicConnection* connection) override;
 
   // Called on every incoming packet. Passes |packet| through to |connection_|.
   virtual void ProcessUdpPacket(const QuicSocketAddress& self_address,
@@ -120,13 +121,16 @@ class QUIC_EXPORT_PRIVATE QuicSession : public QuicConnectionManagerVisitorInter
   // if the socket was unexpectedly blocked.
   // If provided, |ack_notifier_delegate| will be registered to be notified when
   // we have seen ACKs for all packets resulting from this call.
+  // If the connection parameter is not the nullptr, it specifies that the
+  // data has to be sent on this connection (used for handshake messages).
   virtual QuicConsumedData WritevData(
       QuicStream* stream,
       QuicStreamId id,
       QuicIOVector iov,
       QuicStreamOffset offset,
       StreamSendingState state,
-      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
+      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+      QuicConnection *connection);
 
   // Called by streams when they want to close the stream in both directions.
   virtual void SendRstStream(QuicStreamId id,

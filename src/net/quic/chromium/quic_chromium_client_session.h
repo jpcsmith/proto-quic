@@ -307,7 +307,7 @@ class NET_EXPORT_PRIVATE QuicChromiumClientSession
   void OnHeadersHeadOfLineBlocking(QuicTime::Delta delta) override;
 
   // QuicSession methods:
-  void OnStreamFrame(const QuicStreamFrame& frame) override;
+  void OnStreamFrame(const QuicStreamFrame& frame, QuicConnection* connection) override;
   QuicChromiumClientStream* CreateOutgoingDynamicStream(
       SpdyPriority priority) override;
   const QuicCryptoClientStream* GetCryptoStream() const override;

@@ -246,7 +246,7 @@ void QuicSimpleServerStream::SendHeadersAndBodyAndTrailers(
   QUIC_DLOG(INFO) << "Stream " << id() << " writing body (fin = " << send_fin
                   << ") with size: " << body.size();
   if (!body.empty() || send_fin) {
-    WriteOrBufferData(body, send_fin, nullptr);
+    WriteOrBufferData(body, send_fin, nullptr, nullptr);
   }
   if (send_fin) {
     // Nothing else to send.

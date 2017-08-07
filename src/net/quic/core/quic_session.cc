@@ -70,7 +70,7 @@ QuicSession::~QuicSession() {
       << GetNumLocallyClosedOutgoingStreamsHighestOffset();
 }
 
-void QuicSession::OnStreamFrame(const QuicStreamFrame& frame) {
+void QuicSession::OnStreamFrame(const QuicStreamFrame& frame, QuicConnection *connection) {
   // TODO(rch) deal with the error case of stream id 0.
   QuicStreamId stream_id = frame.stream_id;
   QuicStream* stream = GetOrCreateStream(stream_id);
@@ -84,7 +84,7 @@ void QuicSession::OnStreamFrame(const QuicStreamFrame& frame) {
     }
     return;
   }
-  stream->OnStreamFrame(frame);
+  stream->OnStreamFrame(frame, connection);
 }
 
 void QuicSession::OnRstStream(const QuicRstStreamFrame& frame) {
@@ -147,6 +147,12 @@ void QuicSession::OnSuccessfulVersionNegotiation(
     const QuicVersion& /*version*/) {}
 
 void QuicSession::OnPathDegrading() {}
+
+void QuicSession::StartCryptoConnect(QuicConnection* connection) {
+  DCHECK(perspective() == Perspective::IS_CLIENT);
+
+  GetMutableCryptoStream()->CryptoConnect(connection);
+}
 
 void QuicSession::OnWindowUpdateFrame(const QuicWindowUpdateFrame& frame) {
   // Stream may be closed by the time we receive a WINDOW_UPDATE, so we can't
@@ -292,7 +298,8 @@ QuicConsumedData QuicSession::WritevData(
     QuicIOVector iov,
     QuicStreamOffset offset,
     StreamSendingState state,
-    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener) {
+    QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+    QuicConnection* connection) {
   // This check is an attempt to deal with potential memory corruption
   // in which |id| ends up set to 1 (the crypto stream id). If this happen
   // it might end up resulting in unencrypted stream data being sent.
@@ -312,7 +319,7 @@ QuicConsumedData QuicSession::WritevData(
     return QuicConsumedData(0, false);
   }
   QuicConsumedData data = connection_manager_->SendStreamData(id, iov, offset, state,
-                                                      std::move(ack_listener));
+                                                      std::move(ack_listener), connection);
   write_blocked_streams_.UpdateBytesForStream(id, data.bytes_consumed);
   return data;
 }
@@ -429,15 +436,15 @@ void QuicSession::OnFinalByteOffsetReceived(
 }
 
 bool QuicSession::IsEncryptionEstablished() const {
-  return GetCryptoStream()->encryption_established();
+  return GetCryptoStream()->encryption_established(nullptr);
 }
 
 bool QuicSession::IsCryptoHandshakeConfirmed() const {
-  return GetCryptoStream()->handshake_confirmed();
+  return GetCryptoStream()->handshake_confirmed(nullptr);
 }
 
 void QuicSession::OnConfigNegotiated(QuicConnection *connection) {
-  InitialConnection()->SetFromConfig(config_);
+  connection->SetFromConfig(config_);
 
   uint32_t max_streams = 0;
   if (config_.HasReceivedMaxIncomingDynamicStreams()) {
@@ -601,7 +608,6 @@ void QuicSession::OnCryptoHandshakeEvent(QuicConnection *connection, CryptoHands
       // Discard originally encrypted packets, since they can't be decrypted by
       // the peer.
       connection->NeuterUnencryptedPackets();
-      connection_manager()->OnHandshakeComplete();
       break;
 
     default:

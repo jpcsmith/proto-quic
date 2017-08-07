@@ -51,8 +51,8 @@ class QUIC_EXPORT_PRIVATE QuicStream {
   void SetFromConfig();
 
   // Called by the session when a (potentially duplicate) stream frame has been
-  // received for this stream.
-  virtual void OnStreamFrame(const QuicStreamFrame& frame);
+  // received for this stream on a certain connection.
+  virtual void OnStreamFrame(const QuicStreamFrame& frame, QuicConnection* connection);
 
   // Called by the session when the connection becomes writeable to allow the
   // stream to write any pending data.
@@ -181,7 +181,8 @@ class QUIC_EXPORT_PRIVATE QuicStream {
   void WriteOrBufferData(
       QuicStringPiece data,
       bool fin,
-      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
+      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+      QuicConnection* connection);
 
   // Adds random padding after the fin is consumed for this stream.
   void AddRandomPaddingAfterFin();
@@ -196,7 +197,8 @@ class QUIC_EXPORT_PRIVATE QuicStream {
       const struct iovec* iov,
       int iov_count,
       bool fin,
-      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
+      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+      QuicConnection* connection);
 
   // Allows override of the session level writev, for the force HOL
   // blocking experiment.
@@ -204,7 +206,8 @@ class QUIC_EXPORT_PRIVATE QuicStream {
       QuicIOVector iov,
       QuicStreamOffset offset,
       bool fin,
-      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
+      QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+      QuicConnection* connection);
 
   // Close the write side of the socket.  Further writes will fail.
   // Can be called by the subclass or internally.
@@ -237,7 +240,8 @@ class QUIC_EXPORT_PRIVATE QuicStream {
   struct PendingData {
     PendingData(
         std::string data_in,
-        QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener);
+        QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener,
+        QuicConnection* connection);
     ~PendingData();
 
     // Pending data to be written.
@@ -247,6 +251,9 @@ class QUIC_EXPORT_PRIVATE QuicStream {
     // AckListener that should be notified when the pending data is acked.
     // Can be nullptr.
     QuicReferenceCountedPointer<QuicAckListenerInterface> ack_listener;
+    // The connection on which the data should be sent.
+    // Can be nullptr.
+    QuicConnection* connection;
   };
 
   // Calls MaybeSendBlocked on the stream's flow controller and the connection

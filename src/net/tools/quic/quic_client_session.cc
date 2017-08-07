@@ -43,7 +43,7 @@ void QuicClientSession::OnProofVerifyDetailsAvailable(
 
 bool QuicClientSession::ShouldCreateOutgoingDynamicStream() {
   DCHECK(!FLAGS_quic_reloadable_flag_quic_refactor_stream_creation);
-  if (!crypto_stream_->encryption_established()) {
+  if (!crypto_stream_->encryption_established(nullptr)) {
     QUIC_DLOG(INFO) << "Encryption not active so no outgoing stream created.";
     return false;
   }
@@ -84,9 +84,9 @@ const QuicCryptoClientStreamBase* QuicClientSession::GetCryptoStream() const {
   return crypto_stream_.get();
 }
 
-void QuicClientSession::CryptoConnect() {
+void QuicClientSession::CryptoConnect(QuicConnection* connection) {
   DCHECK(flow_controller());
-  crypto_stream_->CryptoConnect();
+  crypto_stream_->CryptoConnect(connection);
 }
 
 int QuicClientSession::GetNumSentClientHellos() const {

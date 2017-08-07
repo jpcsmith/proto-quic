@@ -267,6 +267,7 @@ QuicErrorCode CryptoFramer::Process(QuicStringPiece input,
         reader.ReadStringPiece(&value, item.second);
         message_.SetStringPiece(item.first, value);
       }
+      message_.SetConnection(process_connection_);
       visitor_->OnHandshakeMessage(message_);
       Clear();
       state_ = STATE_READING_TAG;

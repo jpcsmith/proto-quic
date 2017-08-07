@@ -17,6 +17,8 @@
 
 namespace net {
 
+class QuicConnection;
+
 // An intermediate format of a handshake message that's convenient for a
 // CryptoFramer to serialize from or parse into.
 class QUIC_EXPORT_PRIVATE CryptoHandshakeMessage {
@@ -28,6 +30,11 @@ class QUIC_EXPORT_PRIVATE CryptoHandshakeMessage {
 
   CryptoHandshakeMessage& operator=(const CryptoHandshakeMessage& other);
   CryptoHandshakeMessage& operator=(CryptoHandshakeMessage&& other);
+
+  void SetConnection(QuicConnection* connection) {
+    connection_ = connection;
+  }
+  QuicConnection* Connection() const { return connection_; }
 
   // Clears state.
   void Clear();
@@ -128,6 +135,9 @@ class QUIC_EXPORT_PRIVATE CryptoHandshakeMessage {
   QuicTagValueMap tag_value_map_;
 
   size_t minimum_size_;
+
+  // The connection on which this message was received or will be sent.
+  QuicConnection* connection_;
 
   // The serialized form of the handshake message. This member is constructed
   // lasily.
