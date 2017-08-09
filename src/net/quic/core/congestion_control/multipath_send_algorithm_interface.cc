@@ -76,12 +76,14 @@ QuicByteCount MultipathSendAlgorithmInterface::GetCongestionWindow(
 
 bool MultipathSendAlgorithmInterface::InSlowStart(
     const QuicSubflowDescriptor& descriptor) const {
-  return false;
+  DCHECK(TracksDescriptor(descriptor));
+  return GetParameters(descriptor).in_slow_start;
 }
 
 bool MultipathSendAlgorithmInterface::InRecovery(
     const QuicSubflowDescriptor& descriptor) const {
-  return false;
+  DCHECK(TracksDescriptor(descriptor));
+  return !GetParameters(descriptor).in_slow_start;
 }
 
 QuicByteCount MultipathSendAlgorithmInterface::GetSlowStartThreshold(

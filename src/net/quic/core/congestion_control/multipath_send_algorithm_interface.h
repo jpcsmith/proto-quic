@@ -204,7 +204,7 @@ protected:
     SubflowParameters(RttStats* rttStats)
         : rtt_stats(rttStats), congestion_window(kInitialCongestionWindow), bytes_in_flight(
             0), congestion_state(SUBFLOW_CONGESTION_SLOWSTART), forward_secure_encryption_established(
-            false), encryption_level(ENCRYPTION_NONE) {
+            false), encryption_level(ENCRYPTION_NONE), in_slow_start(false) {
     }
     RttStats* rtt_stats;
     QuicByteCount congestion_window;
@@ -212,9 +212,18 @@ protected:
     SubflowCongestionState congestion_state;
     bool forward_secure_encryption_established;
     EncryptionLevel encryption_level;
+    bool in_slow_start;
   };
 
   std::map<QuicSubflowDescriptor, SubflowParameters> parameters_;
+
+  bool TracksDescriptor(const QuicSubflowDescriptor& descriptor) const {
+    return parameters_.find(descriptor) != parameters_.end();
+  }
+  SubflowParameters& GetParameters(const QuicSubflowDescriptor& descriptor) const {
+    DCHECK(TracksDescriptor(descriptor));
+    return parameters_.at(descriptor);
+  }
 
 private:
   std::unique_ptr<MultipathSchedulerInterface> scheduler_;

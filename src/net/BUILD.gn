@@ -1134,6 +1134,8 @@ component("net") {
       "quic/core/congestion_control/multipath_scheduler_interface.h",
       "quic/core/congestion_control/multipath_send_algorithm_interface.cc",
       "quic/core/congestion_control/multipath_send_algorithm_interface.h",
+      "quic/core/congestion_control/olia_send_algorithm.cc",
+      "quic/core/congestion_control/olia_send_algorithm.h",
       "quic/core/congestion_control/pacing_sender.cc",
       "quic/core/congestion_control/pacing_sender.h",
       "quic/core/congestion_control/prr_sender.cc",
