@@ -42,6 +42,24 @@ void OliaSendAlgorithm::Ack(const QuicSubflowDescriptor& descriptor,QuicPacketLe
 
   DeterminePaths();
 
+  double alpha = 0;
+  if(collected_paths_.find(descriptor) != collected_paths_.end()) {
+    alpha = 1.0/(w(descriptor)*olia_parameters_.size()*collected_paths_.size());
+  } else if(max_w_paths_.find(descriptor) != max_w_paths_.end() && !collected_paths_.empty()) {
+    alpha = -1.0/(w(descriptor)*olia_parameters_.size()*max_w_paths_.size());
+  }
+
+  double sum = 0;
+  for(std::pair<QuicSubflowDescriptor, OliaSubflowParameters> p: olia_parameters_) {
+    sum += ((double)w(p.first))/rtt(descriptor);
+  }
+  sum *= sum;
+
+  //TODO(cyrill) get maximum segment size
+  double MSS_r = 0;
+
+  w(descriptor) += w(descriptor)/rtt(descriptor)/rtt(descriptor)/sum+alpha*MSS_r*GetOliaParameters(descriptor).l2r;
+
 // TODO(cyrill)
 //  For each ACK on the path r:
 //
@@ -114,30 +132,6 @@ void OliaSendAlgorithm::DeterminePaths() {
 QuicByteCount OliaSendAlgorithm::l(const QuicSubflowDescriptor& descriptor) {
   OliaSubflowParameters p = GetOliaParameters(descriptor);
   return std::max(p.l1r,p.l2r);
-}
-QuicByteCount OliaSendAlgorithm::wTotal() {
-  QuicByteCount wt = 0;
-  for(std::pair<QuicSubflowDescriptor,SubflowParameters> p: parameters_) {
-    wt += w(p.first);
-  }
-  return wt;
-}
-double OliaSendAlgorithm::a() {
-  // numerator = max(w(r)/RTT(r)^2)
-  // denominator = sum(w(r)/RTT(r))^2
-  // a = wTotal*(numerator/denominator)
-  double numerator = 0, denominator = 0;
-  for(std::pair<QuicSubflowDescriptor,SubflowParameters> p: parameters_) {
-    double srtt = rtt(p.first);
-    double pNumerator = ((double)w(p.first))/srtt/srtt;
-
-    if(pNumerator > numerator) {
-      numerator = pNumerator;
-    }
-    denominator += ((double)w(p.first))/srtt;
-  }
-  denominator *= denominator;
-  return ((double)wTotal())*numerator/denominator;
 }
 
 } // namespace net

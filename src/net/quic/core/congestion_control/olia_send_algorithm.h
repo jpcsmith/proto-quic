@@ -50,9 +50,6 @@ private:
   void DeterminePaths();
   QuicByteCount l(const QuicSubflowDescriptor& descriptor);
 
-  QuicByteCount wTotal();
-  double a();
-
   struct OliaSubflowParameters {
     OliaSubflowParameters() {
     }
