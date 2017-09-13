@@ -58,7 +58,9 @@ QuicSentPacketManager::QuicSentPacketManager(
     const QuicClock* clock,
     QuicConnectionStats* stats,
     CongestionControlType congestion_control_type,
-    LossDetectionType loss_type)
+    LossDetectionType loss_type,
+    QuicSubflowDescriptor descriptor,
+    MultipathSendAlgorithmInterface* sendAlgorithm)
     : unacked_packets_(),
       perspective_(perspective),
       clock_(clock),
@@ -66,6 +68,7 @@ QuicSentPacketManager::QuicSentPacketManager(
       debug_delegate_(nullptr),
       network_change_visitor_(nullptr),
       initial_congestion_window_(kInitialCongestionWindow),
+      send_algorithm_(sendAlgorithm),
       loss_algorithm_(&general_loss_algorithm_),
       general_loss_algorithm_(loss_type),
       n_connection_simulation_(false),
@@ -84,11 +87,20 @@ QuicSentPacketManager::QuicSentPacketManager(
       largest_newly_acked_(0),
       largest_mtu_acked_(0),
       handshake_confirmed_(false),
-      largest_packet_peer_knows_is_acked_(0) {
-  SetSendAlgorithm(congestion_control_type);
+      largest_packet_peer_knows_is_acked_(0),
+      subflow_descriptor_(descriptor) {
+  if(sendAlgorithm != nullptr) {
+    SetMultipathSendAlgorithm(sendAlgorithm);
+  }
 }
 
 QuicSentPacketManager::~QuicSentPacketManager() {}
+
+void QuicSentPacketManager::SetMultipathSendAlgorithm(
+    MultipathSendAlgorithmInterface* sendAlgorithm) {
+  send_algorithm_ = sendAlgorithm;
+  send_algorithm_->AddSubflow(subflow_descriptor_, &rtt_stats_);
+}
 
 void QuicSentPacketManager::SetFromConfig(const QuicConfig& config) {
   if (config.HasReceivedInitialRoundTripTimeUs() &&
@@ -127,6 +139,7 @@ void QuicSentPacketManager::SetFromConfig(const QuicConfig& config) {
   // PacingSender around it, since wrapping a PacingSender around an
   // already paced SendAlgorithm produces a DCHECK.  TODO(fayang):
   // Change this if/when the PCCSender uses the PacingSender.
+
   using_pacing_ = !FLAGS_quic_disable_pacing_for_perf_tests &&
                   send_algorithm_->GetCongestionControlType() != kPCC;
 
@@ -217,8 +230,8 @@ void QuicSentPacketManager::OnIncomingAck(const QuicAckFrame& ack_frame,
   unacked_packets_.RemoveObsoletePackets();
 
   sustained_bandwidth_recorder_.RecordEstimate(
-      send_algorithm_->InRecovery(), send_algorithm_->InSlowStart(),
-      send_algorithm_->BandwidthEstimate(), ack_receive_time, clock_->WallNow(),
+      send_algorithm_->InRecovery(subflow_descriptor_), send_algorithm_->InSlowStart(subflow_descriptor_),
+      send_algorithm_->BandwidthEstimate(subflow_descriptor_), ack_receive_time, clock_->WallNow(),
       rtt_stats_.smoothed_rtt());
 
   // Anytime we are making forward progress and have a new RTT estimate, reset
@@ -233,7 +246,7 @@ void QuicSentPacketManager::OnIncomingAck(const QuicAckFrame& ack_frame,
         rtt_stats_.ExpireSmoothedMetrics();
       } else {
         if (!use_new_rto_) {
-          send_algorithm_->OnRetransmissionTimeout(true);
+          send_algorithm_->OnRetransmissionTimeout(subflow_descriptor_, true);
         }
       }
     }
@@ -277,11 +290,12 @@ void QuicSentPacketManager::MaybeInvokeCongestionEvent(
   if (!rtt_updated && packets_acked_.empty() && packets_lost_.empty()) {
     return;
   }
-  if (using_pacing_) {
+  if (false && using_pacing_) {
     pacing_sender_.OnCongestionEvent(rtt_updated, prior_in_flight, event_time,
                                      packets_acked_, packets_lost_);
   } else {
-    send_algorithm_->OnCongestionEvent(rtt_updated, prior_in_flight, event_time,
+    send_algorithm_->OnCongestionEvent(subflow_descriptor_,rtt_updated,
+                                       prior_in_flight, event_time,
                                        packets_acked_, packets_lost_);
   }
   packets_acked_.clear();
@@ -537,12 +551,12 @@ bool QuicSentPacketManager::OnPacketSent(
   }
 
   bool in_flight;
-  if (using_pacing_) {
+  if (false && using_pacing_) {
     in_flight = pacing_sender_.OnPacketSent(
         sent_time, unacked_packets_.bytes_in_flight(), packet_number,
         serialized_packet->encrypted_length, has_retransmittable_data);
   } else {
-    in_flight = send_algorithm_->OnPacketSent(
+    in_flight = send_algorithm_->OnPacketSent(subflow_descriptor_,
         sent_time, unacked_packets_.bytes_in_flight(), packet_number,
         serialized_packet->encrypted_length, has_retransmittable_data);
   }
@@ -742,12 +756,12 @@ QuicTime::Delta QuicSentPacketManager::TimeUntilSend(QuicTime now) {
   // send algorithm does not need to be consulted.
   if (pending_timer_transmission_count_ > 0) {
     delay = QuicTime::Delta::Zero();
-  } else if (using_pacing_) {
+  } else if (false && using_pacing_) {
     delay =
         pacing_sender_.TimeUntilSend(now, unacked_packets_.bytes_in_flight());
   } else {
     delay =
-        send_algorithm_->TimeUntilSend(now, unacked_packets_.bytes_in_flight());
+        send_algorithm_->TimeUntilSend(subflow_descriptor_, now, unacked_packets_.bytes_in_flight());
   }
   return delay;
 }
@@ -862,7 +876,7 @@ const RttStats* QuicSentPacketManager::GetRttStats() const {
 QuicBandwidth QuicSentPacketManager::BandwidthEstimate() const {
   // TODO(ianswett): Remove BandwidthEstimate from SendAlgorithmInterface
   // and implement the logic here.
-  return send_algorithm_->BandwidthEstimate();
+  return send_algorithm_->BandwidthEstimate(QuicSubflowDescriptor());
 }
 
 const QuicSustainedBandwidthRecorder*
@@ -872,19 +886,19 @@ QuicSentPacketManager::SustainedBandwidthRecorder() const {
 
 QuicPacketCount QuicSentPacketManager::EstimateMaxPacketsInFlight(
     QuicByteCount max_packet_length) const {
-  return send_algorithm_->GetCongestionWindow() / max_packet_length;
+  return send_algorithm_->GetCongestionWindow(QuicSubflowDescriptor()) / max_packet_length;
 }
 
 QuicPacketCount QuicSentPacketManager::GetCongestionWindowInTcpMss() const {
-  return send_algorithm_->GetCongestionWindow() / kDefaultTCPMSS;
+  return send_algorithm_->GetCongestionWindow(QuicSubflowDescriptor()) / kDefaultTCPMSS;
 }
 
 QuicByteCount QuicSentPacketManager::GetCongestionWindowInBytes() const {
-  return send_algorithm_->GetCongestionWindow();
+  return send_algorithm_->GetCongestionWindow(QuicSubflowDescriptor());
 }
 
 QuicPacketCount QuicSentPacketManager::GetSlowStartThresholdInTcpMss() const {
-  return send_algorithm_->GetSlowStartThreshold() / kDefaultTCPMSS;
+  return send_algorithm_->GetSlowStartThreshold(QuicSubflowDescriptor()) / kDefaultTCPMSS;
 }
 
 std::string QuicSentPacketManager::GetDebugState() const {
@@ -917,7 +931,8 @@ void QuicSentPacketManager::SetSendAlgorithm(
 
 void QuicSentPacketManager::SetSendAlgorithm(
     SendAlgorithmInterface* send_algorithm) {
-  send_algorithm_.reset(send_algorithm);
+  DCHECK(false);
+  //send_algorithm_ = send_algorithm;
   pacing_sender_.set_sender(send_algorithm);
 }
 
@@ -958,7 +973,7 @@ void QuicSentPacketManager::SetNetworkChangeVisitor(
 }
 
 bool QuicSentPacketManager::InSlowStart() const {
-  return send_algorithm_->InSlowStart();
+  return send_algorithm_->InSlowStart(QuicSubflowDescriptor());
 }
 
 size_t QuicSentPacketManager::GetConsecutiveRtoCount() const {
@@ -974,7 +989,8 @@ void QuicSentPacketManager::OnApplicationLimited() {
 }
 
 const SendAlgorithmInterface* QuicSentPacketManager::GetSendAlgorithm() const {
-  return send_algorithm_.get();
+  DCHECK(false);
+  return nullptr;
 }
 
 }  // namespace net

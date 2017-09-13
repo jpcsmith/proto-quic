@@ -19,10 +19,17 @@ class QuicConnectionPeer;
 
 struct QuicConnectionStats;
 
+class QUIC_EXPORT_PRIVATE QuicReceivedPacketManagerVisitor {
+public:
+  virtual ~QuicReceivedPacketManagerVisitor() {}
+
+  virtual void OnAckFrameUpdated() = 0;
+};
+
 // Records all received packets by a connection.
 class QUIC_EXPORT_PRIVATE QuicReceivedPacketManager {
  public:
-  explicit QuicReceivedPacketManager(QuicConnectionStats* stats);
+  explicit QuicReceivedPacketManager(QuicConnectionStats* stats, QuicReceivedPacketManagerVisitor* visitor);
   virtual ~QuicReceivedPacketManager();
 
   void SetSubflowId(QuicSubflowId subflow_id);
@@ -77,6 +84,8 @@ class QUIC_EXPORT_PRIVATE QuicReceivedPacketManager {
  private:
   friend class test::QuicConnectionPeer;
 
+  void set_ack_frame_updated(bool ack_frame_updated);
+
   // Least packet number of the the packet sent by the peer for which it
   // hasn't received an ack.
   QuicPacketNumber peer_least_packet_awaiting_ack_;
@@ -97,6 +106,8 @@ class QUIC_EXPORT_PRIVATE QuicReceivedPacketManager {
   QuicTime time_largest_observed_;
 
   QuicConnectionStats* stats_;
+
+  QuicReceivedPacketManagerVisitor* visitor_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicReceivedPacketManager);
 };
