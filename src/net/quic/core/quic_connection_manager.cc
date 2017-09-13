@@ -10,6 +10,7 @@
 #include "net/quic/core/quic_packet_creator.h"
 #include "net/quic/core/congestion_control/roundrobin_algorithm.h"
 #include "net/quic/core/congestion_control/mtcp_send_algorithm.h"
+#include "net/quic/core/congestion_control/olia_send_algorithm.h"
 
 namespace net {
 
@@ -18,7 +19,7 @@ QuicConnectionManager::QuicConnectionManager(QuicConnection *connection)
         std::map<QuicSubflowId, QuicConnection*>()), next_outgoing_subflow_id_(
         connection->perspective() == Perspective::IS_SERVER ? 2 : 3), current_subflow_id_(
         kInitialSubflowId), next_subflow_id_(0), multipath_send_algorithm_(
-        new MtcpSendAlgorithm(new RoundRobinAlgorithm())) {
+        new OliaSendAlgorithm(new RoundRobinAlgorithm())) {
   connection->SetMultipathSendAlgorithm(GetSendAlgorithm());
   AddConnection(connection->SubflowDescriptor(), kInitialSubflowId, connection);
   connection->set_visitor(this);

@@ -27,6 +27,7 @@ struct QuicTransmissionInfo;
 class QUIC_EXPORT_PRIVATE OliaSendAlgorithm : public MultipathSendAlgorithmInterface {
 public:
   OliaSendAlgorithm(MultipathSchedulerInterface* scheduler);
+  ~OliaSendAlgorithm() override;
 
   void OnCongestionEvent(
       const QuicSubflowDescriptor& descriptor, bool rtt_updated,
@@ -42,6 +43,9 @@ public:
   void OnRetransmissionTimeout(const QuicSubflowDescriptor& descriptor,
       bool packets_retransmitted) override;
 
+  void AddSubflow(const QuicSubflowDescriptor& subflowDescriptor,
+      RttStats* rttStats) override;
+
 private:
   void Ack(const QuicSubflowDescriptor& descriptor,QuicPacketLength length);
   void Loss(const QuicSubflowDescriptor& descriptor,QuicPacketLength length);
@@ -51,12 +55,12 @@ private:
   QuicByteCount l(const QuicSubflowDescriptor& descriptor);
 
   struct OliaSubflowParameters {
-    OliaSubflowParameters() {
-    }
-    OliaSubflowParameters(RttStats* rttStats) : l1r(0), l2r(0) {
+    OliaSubflowParameters() : l1r(0), l2r(0), id(current_id_++) {
     }
     QuicByteCount l1r, l2r;
+    int id;
   };
+  static int current_id_;
 
   std::map<QuicSubflowDescriptor, OliaSubflowParameters> olia_parameters_;
   std::set<QuicSubflowDescriptor> collected_paths_;
@@ -65,7 +69,7 @@ private:
   bool TracksOliaDescriptor(const QuicSubflowDescriptor& descriptor) const {
     return olia_parameters_.find(descriptor) != olia_parameters_.end();
   }
-  OliaSubflowParameters& GetOliaParameters(const QuicSubflowDescriptor& descriptor) const {
+  OliaSubflowParameters& GetOliaParameters(const QuicSubflowDescriptor& descriptor) {
     DCHECK(TracksOliaDescriptor(descriptor));
     return olia_parameters_.at(descriptor);
   }

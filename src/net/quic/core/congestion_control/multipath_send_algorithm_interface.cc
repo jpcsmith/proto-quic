@@ -45,6 +45,7 @@ QuicTime::Delta MultipathSendAlgorithmInterface::TimeUntilSend(
   if (bytes_in_flight < parameters_[descriptor].congestion_window) {
     return QuicTime::Delta::Zero();
   } else {
+    QUIC_LOG(INFO) << bytes_in_flight << " >= " << parameters_[descriptor].congestion_window;
     return QuicTime::Delta::Infinite();
   }
 }

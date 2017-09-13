@@ -202,7 +202,7 @@ protected:
     SubflowParameters() {
     }
     SubflowParameters(RttStats* rttStats)
-        : rtt_stats(rttStats), congestion_window(kInitialCongestionWindow), bytes_in_flight(
+        : rtt_stats(rttStats), congestion_window(kInitialCongestionWindow*kDefaultTCPMSS), bytes_in_flight(
             0), congestion_state(SUBFLOW_CONGESTION_SLOWSTART), forward_secure_encryption_established(
             false), encryption_level(ENCRYPTION_NONE), in_slow_start(false) {
     }
@@ -220,7 +220,7 @@ protected:
   bool TracksDescriptor(const QuicSubflowDescriptor& descriptor) const {
     return parameters_.find(descriptor) != parameters_.end();
   }
-  SubflowParameters& GetParameters(const QuicSubflowDescriptor& descriptor) const {
+  const SubflowParameters& GetParameters(const QuicSubflowDescriptor& descriptor) const {
     DCHECK(TracksDescriptor(descriptor));
     return parameters_.at(descriptor);
   }

@@ -1604,6 +1604,7 @@ bool QuicConnection::CanWrite(HasRetransmittableData retransmittable) {
   }
 
   if (writer_->IsWriteBlocked()) {
+    QUIC_LOG(INFO) << "write blocked";
     visitor_->OnWriteBlocked(this);
     return false;
   }
@@ -1614,6 +1615,7 @@ bool QuicConnection::CanWrite(HasRetransmittableData retransmittable) {
   }
   // If the send alarm is set, wait for it to fire.
   if (send_alarm_->IsSet()) {
+    QUIC_LOG(INFO) << "send alarm set";
     return false;
   }
 
@@ -1621,6 +1623,7 @@ bool QuicConnection::CanWrite(HasRetransmittableData retransmittable) {
   QuicTime::Delta delay = sent_packet_manager_.TimeUntilSend(now);
   if (delay.IsInfinite()) {
     send_alarm_->Cancel();
+    QUIC_LOG(INFO) << "time until send = infinite";
     return false;
   }
 

@@ -339,6 +339,7 @@ class QUIC_EXPORT_PRIVATE QuicSentPacketManager {
                                      QuicPacketNumber acked_packet_number);
 
   // Sets the send algorithm to the given congestion control type and points the
+  // |send_algorithm_|. Takes ownership of |send_algorithm|. Can be called any
   // pacing sender at |send_algorithm_|. Can be called any number of times.
   void SetSendAlgorithm(CongestionControlType congestion_control_type);
 
